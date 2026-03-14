@@ -15,6 +15,7 @@ def main():
 
     # iterate through registered algorithm config classes
     all_configs = get_all_registered_configs()
+    print("Generating config templates for the following algorithms: {}".format(all_configs.keys()))
     for algo_name in all_configs:
         # make config class for this algorithm
         c = all_configs[algo_name]()

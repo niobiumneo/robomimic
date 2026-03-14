@@ -31,7 +31,7 @@ from collections import OrderedDict
 import torch
 from torch.utils.data import DataLoader
 
-import robomimic
+# import robomimic
 import robomimic.utils.train_utils as TrainUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils

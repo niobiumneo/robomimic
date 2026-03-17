@@ -157,6 +157,18 @@ class BCCaMIConfig(BCConfig):
         super(BCCaMIConfig, self).train_config()
         self.train.hdf5_load_next_obs = True
 
+    def observation_config(self):
+        super(BCCaMIConfig, self).observation_config()
+
+        # keep your image key
+        if "agentview_image" not in self.observation.modalities.obs.rgb:
+            self.observation.modalities.obs.rgb.append("agentview_image")
+
+        # add synthetic force key as low_dim obs
+        if "force" not in self.observation.modalities.obs.low_dim:
+            self.observation.modalities.obs.low_dim.append("force")
+
+
     def algo_config(self):
         super(BCCaMIConfig, self).algo_config()
 

@@ -139,6 +139,9 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.pad_frame_stack = pad_frame_stack
         self.get_pad_mask = get_pad_mask
 
+        # Contact threshold for CaMI
+        self.contact_threshold = 1.0
+
         self.load_demo_info(filter_by_attribute=self.filter_by_attribute, demo_limit=demo_limit)
 
         # maybe prepare for observation normalization
@@ -180,7 +183,54 @@ class SequenceDataset(torch.utils.data.Dataset):
         else:
             self.hdf5_cache = None
 
+
         self.close_and_delete_hdf5_handle()
+
+    def _get_force_from_states(self, ep, states_array):
+        state_dim_original = int(self.hdf5_file["data/{}".format(ep)].attrs["state_dim_original"])
+        state_dim_ft = int(self.hdf5_file["data/{}".format(ep)].attrs["state_dim_ft"])
+
+        assert state_dim_ft >= 6, "Expected at least 6 appended FT dims in states"
+
+        ft = states_array[:, state_dim_original : state_dim_original + 6].astype(np.float32)
+        return ft
+    
+    def _get_contact_from_force(self, force_array, threshold=1.0):
+        contact = (np.linalg.norm(force_array[:, :3], axis=1) > threshold).astype(np.float32)
+        return contact[:, None]
+    
+    def _get_synthetic_obs(self, ep, obs_key, prefix="obs"):
+        states_arr = self.hdf5_file[f"data/{ep}/states"][()].astype("float32")
+
+        if obs_key == "force":
+            force_arr = self._get_force_from_states(ep, states_arr)
+            if prefix == "next_obs":
+                return np.concatenate([force_arr[1:], force_arr[-1:]], axis=0)
+            return force_arr
+
+        if obs_key == "contact_label":
+            force_arr = self._get_force_from_states(ep, states_arr)
+            contact_arr = self._get_contact_from_force(force_arr, threshold=self.contact_threshold)
+            if prefix == "next_obs":
+                return np.concatenate([contact_arr[1:], contact_arr[-1:]], axis=0)
+            return contact_arr
+
+        raise KeyError(obs_key)
+    
+    def _is_synthetic_obs_key(self, obs_key):
+        return obs_key in ["force", "contact_label"]
+    
+    def _get_obs_traj(self, ep, prefix="obs"):
+        """
+        Fetch full trajectory observation arrays for all obs_keys, including synthetic ones.
+        """
+        obs_traj = {}
+        for k in self.obs_keys:
+            if self._is_synthetic_obs_key(k):
+                obs_traj[k] = self._get_synthetic_obs(ep, k, prefix=prefix).astype("float32")
+            else:
+                obs_traj[k] = self.hdf5_file[f"data/{ep}/{prefix}/{k}"][()].astype("float32")
+        return obs_traj
 
     def load_demo_info(self, filter_by_attribute=None, demos=None, demo_limit=None):
         """
@@ -294,21 +344,47 @@ class SequenceDataset(torch.utils.data.Dataset):
         """
         return self.total_num_sequences
 
+    # def load_dataset_in_memory(self, demo_list, hdf5_file, obs_keys, dataset_keys, load_next_obs):
+    #     """
+    #     Loads the hdf5 dataset into memory, preserving the structure of the file. Note that this
+    #     differs from `self.getitem_cache`, which, if active, actually caches the outputs of the
+    #     `getitem` operation.
+
+    #     Args:
+    #         demo_list (list): list of demo keys, e.g., 'demo_0'
+    #         hdf5_file (h5py.File): file handle to the hdf5 dataset.
+    #         obs_keys (list, tuple): observation keys to fetch, e.g., 'images'
+    #         dataset_keys (list, tuple): dataset keys to fetch, e.g., 'actions'
+    #         load_next_obs (bool): whether to load next_obs from the dataset
+
+    #     Returns:
+    #         all_data (dict): dictionary of loaded data.
+    #     """
+    #     all_data = dict()
+    #     print("SequenceDataset: loading dataset into memory...")
+    #     for ep in LogUtils.custom_tqdm(demo_list):
+    #         all_data[ep] = {}
+    #         all_data[ep]["attrs"] = {}
+    #         all_data[ep]["attrs"]["num_samples"] = hdf5_file["data/{}".format(ep)].attrs["num_samples"]
+    #         # get obs
+    #         all_data[ep]["obs"] = {k: hdf5_file["data/{}/obs/{}".format(ep, k)][()] for k in obs_keys}
+    #         if load_next_obs:
+    #             all_data[ep]["next_obs"] = {k: hdf5_file["data/{}/next_obs/{}".format(ep, k)][()] for k in obs_keys}
+    #         # get other dataset keys
+    #         for k in dataset_keys:
+    #             if k in hdf5_file["data/{}".format(ep)]:
+    #                 all_data[ep][k] = hdf5_file["data/{}/{}".format(ep, k)][()].astype('float32')
+    #             else:
+    #                 all_data[ep][k] = np.zeros((all_data[ep]["attrs"]["num_samples"], 1), dtype=np.float32)
+
+    #         if "model_file" in hdf5_file["data/{}".format(ep)].attrs:
+    #             all_data[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
+
+    #     return all_data
+    
     def load_dataset_in_memory(self, demo_list, hdf5_file, obs_keys, dataset_keys, load_next_obs):
         """
-        Loads the hdf5 dataset into memory, preserving the structure of the file. Note that this
-        differs from `self.getitem_cache`, which, if active, actually caches the outputs of the
-        `getitem` operation.
-
-        Args:
-            demo_list (list): list of demo keys, e.g., 'demo_0'
-            hdf5_file (h5py.File): file handle to the hdf5 dataset.
-            obs_keys (list, tuple): observation keys to fetch, e.g., 'images'
-            dataset_keys (list, tuple): dataset keys to fetch, e.g., 'actions'
-            load_next_obs (bool): whether to load next_obs from the dataset
-
-        Returns:
-            all_data (dict): dictionary of loaded data.
+        Loads the hdf5 dataset into memory, preserving the structure of the file.
         """
         all_data = dict()
         print("SequenceDataset: loading dataset into memory...")
@@ -316,14 +392,28 @@ class SequenceDataset(torch.utils.data.Dataset):
             all_data[ep] = {}
             all_data[ep]["attrs"] = {}
             all_data[ep]["attrs"]["num_samples"] = hdf5_file["data/{}".format(ep)].attrs["num_samples"]
+
             # get obs
-            all_data[ep]["obs"] = {k: hdf5_file["data/{}/obs/{}".format(ep, k)][()] for k in obs_keys}
+            all_data[ep]["obs"] = {}
+            for k in obs_keys:
+                if self._is_synthetic_obs_key(k):
+                    all_data[ep]["obs"][k] = self._get_synthetic_obs(ep, k, prefix="obs").astype("float32")
+                else:
+                    all_data[ep]["obs"][k] = hdf5_file[f"data/{ep}/obs/{k}"][()]
+
+            # get next_obs
             if load_next_obs:
-                all_data[ep]["next_obs"] = {k: hdf5_file["data/{}/next_obs/{}".format(ep, k)][()] for k in obs_keys}
+                all_data[ep]["next_obs"] = {}
+                for k in obs_keys:
+                    if self._is_synthetic_obs_key(k):
+                        all_data[ep]["next_obs"][k] = self._get_synthetic_obs(ep, k, prefix="next_obs").astype("float32")
+                    else:
+                        all_data[ep]["next_obs"][k] = hdf5_file[f"data/{ep}/next_obs/{k}"][()]
+
             # get other dataset keys
             for k in dataset_keys:
                 if k in hdf5_file["data/{}".format(ep)]:
-                    all_data[ep][k] = hdf5_file["data/{}/{}".format(ep, k)][()].astype('float32')
+                    all_data[ep][k] = hdf5_file["data/{}/{}".format(ep, k)][()].astype("float32")
                 else:
                     all_data[ep][k] = np.zeros((all_data[ep]["attrs"]["num_samples"], 1), dtype=np.float32)
 
@@ -332,30 +422,55 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         return all_data
 
+    # def normalize_obs(self):
+    #     """
+    #     Computes a dataset-wide mean and standard deviation for the observations 
+    #     (per dimension and per obs key) and returns it.
+    #     """
+
+    #     # Run through all trajectories. For each one, compute minimal observation statistics, and then aggregate
+    #     # with the previous statistics.
+    #     ep = self.demos[0]
+    #     obs_traj = {k: self.hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in self.obs_keys}
+    #     obs_traj = ObsUtils.process_obs_dict(obs_traj)
+    #     merged_stats = _compute_traj_stats(obs_traj)
+    #     print("SequenceDataset: normalizing observations...")
+    #     for ep in LogUtils.custom_tqdm(self.demos[1:]):
+    #         obs_traj = {k: self.hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in self.obs_keys}
+    #         obs_traj = ObsUtils.process_obs_dict(obs_traj)
+    #         traj_stats = _compute_traj_stats(obs_traj)
+    #         merged_stats = _aggregate_traj_stats(merged_stats, traj_stats)
+
+    #     obs_normalization_stats = { k : {} for k in merged_stats }
+    #     for k in merged_stats:
+    #         # note we add a small tolerance of 1e-3 for std
+    #         obs_normalization_stats[k]["offset"] = merged_stats[k]["mean"].astype(np.float32)
+    #         obs_normalization_stats[k]["scale"] = (np.sqrt(merged_stats[k]["sqdiff"] / merged_stats[k]["n"]) + 1e-3).astype(np.float32)
+    #     return obs_normalization_stats
+
     def normalize_obs(self):
         """
-        Computes a dataset-wide mean and standard deviation for the observations 
+        Computes a dataset-wide mean and standard deviation for the observations
         (per dimension and per obs key) and returns it.
         """
-
-        # Run through all trajectories. For each one, compute minimal observation statistics, and then aggregate
-        # with the previous statistics.
         ep = self.demos[0]
-        obs_traj = {k: self.hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in self.obs_keys}
+        obs_traj = self._get_obs_traj(ep, prefix="obs")
         obs_traj = ObsUtils.process_obs_dict(obs_traj)
         merged_stats = _compute_traj_stats(obs_traj)
+
         print("SequenceDataset: normalizing observations...")
         for ep in LogUtils.custom_tqdm(self.demos[1:]):
-            obs_traj = {k: self.hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in self.obs_keys}
+            obs_traj = self._get_obs_traj(ep, prefix="obs")
             obs_traj = ObsUtils.process_obs_dict(obs_traj)
             traj_stats = _compute_traj_stats(obs_traj)
             merged_stats = _aggregate_traj_stats(merged_stats, traj_stats)
 
-        obs_normalization_stats = { k : {} for k in merged_stats }
+        obs_normalization_stats = {k: {} for k in merged_stats}
         for k in merged_stats:
-            # note we add a small tolerance of 1e-3 for std
             obs_normalization_stats[k]["offset"] = merged_stats[k]["mean"].astype(np.float32)
-            obs_normalization_stats[k]["scale"] = (np.sqrt(merged_stats[k]["sqdiff"] / merged_stats[k]["n"]) + 1e-3).astype(np.float32)
+            obs_normalization_stats[k]["scale"] = (
+                np.sqrt(merged_stats[k]["sqdiff"] / merged_stats[k]["n"]) + 1e-3
+            ).astype(np.float32)
         return obs_normalization_stats
 
     def get_obs_normalization_stats(self):
@@ -406,35 +521,67 @@ class SequenceDataset(torch.utils.data.Dataset):
                 action_stats, self.action_config)
         return self.action_normalization_stats
 
+    # def get_dataset_for_ep(self, ep, key):
+    #     """
+    #     Helper utility to get a dataset for a specific demonstration.
+    #     Takes into account whether the dataset has been loaded into memory.
+    #     """
+
+    #     # check if this key should be in memory
+    #     key_should_be_in_memory = (self.hdf5_cache_mode in ["all", "low_dim"])
+    #     if key_should_be_in_memory:
+    #         # if key is an observation, it may not be in memory
+    #         if '/' in key:
+    #             key1, key2 = key.split('/')
+    #             assert(key1 in ['obs', 'next_obs', 'action_dict'])
+    #             if key2 not in self.obs_keys_in_memory:
+    #                 key_should_be_in_memory = False
+
+    #     if key_should_be_in_memory:
+    #         # read cache
+    #         if '/' in key:
+    #             key1, key2 = key.split('/')
+    #             assert(key1 in ['obs', 'next_obs', 'action_dict'])
+    #             ret = self.hdf5_cache[ep][key1][key2]
+    #         else:
+    #             ret = self.hdf5_cache[ep][key]
+    #     else:
+    #         # read from file
+    #         hd5key = "data/{}/{}".format(ep, key)
+    #         ret = self.hdf5_file[hd5key]
+    #     return ret
+
     def get_dataset_for_ep(self, ep, key):
         """
         Helper utility to get a dataset for a specific demonstration.
         Takes into account whether the dataset has been loaded into memory.
         """
 
+        # Handle synthetic obs / next_obs first
+        if "/" in key:
+            prefix, obs_key = key.split("/", 1)
+            if prefix in ["obs", "next_obs"] and self._is_synthetic_obs_key(obs_key):
+                return self._get_synthetic_obs(ep, obs_key, prefix=prefix)
+
         # check if this key should be in memory
         key_should_be_in_memory = (self.hdf5_cache_mode in ["all", "low_dim"])
         if key_should_be_in_memory:
-            # if key is an observation, it may not be in memory
-            if '/' in key:
-                key1, key2 = key.split('/')
-                assert(key1 in ['obs', 'next_obs', 'action_dict'])
+            if "/" in key:
+                key1, key2 = key.split("/")
+                assert key1 in ["obs", "next_obs", "action_dict"]
                 if key2 not in self.obs_keys_in_memory:
                     key_should_be_in_memory = False
 
         if key_should_be_in_memory:
-            # read cache
-            if '/' in key:
-                key1, key2 = key.split('/')
-                assert(key1 in ['obs', 'next_obs', 'action_dict'])
-                ret = self.hdf5_cache[ep][key1][key2]
-            else:
-                ret = self.hdf5_cache[ep][key]
-        else:
-            # read from file
-            hd5key = "data/{}/{}".format(ep, key)
-            ret = self.hdf5_file[hd5key]
-        return ret
+            if "/" in key:
+                key1, key2 = key.split("/")
+                assert key1 in ["obs", "next_obs", "action_dict"]
+                return self.hdf5_cache[ep][key1][key2]
+            return self.hdf5_cache[ep][key]
+
+        # read from file
+        hd5key = f"data/{ep}/{key}"
+        return self.hdf5_file[hd5key]
 
     def __getitem__(self, index):
         """

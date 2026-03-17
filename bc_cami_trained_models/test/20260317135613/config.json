@@ -40,7 +40,7 @@
     "train": {
         "data": [
             {
-                "path": "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic_datasets/can/ph/low_dim_v15.hdf5"
+                "path": "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite_datasets/table_wiping/1772931257_163442/demo.hdf5"
             }
         ],
         "output_dir": "../bc_cami_trained_models",
@@ -48,7 +48,7 @@
         "num_data_workers": 0,
         "hdf5_cache_mode": "all",
         "hdf5_use_swmr": true,
-        "hdf5_load_next_obs": true,
+        "hdf5_load_next_obs": false,
         "hdf5_normalize_obs": false,
         "hdf5_filter_key": null,
         "hdf5_validation_filter_key": null,
@@ -215,12 +215,11 @@
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "robot0_eef_pos",
-                    "robot0_eef_quat",
-                    "robot0_gripper_qpos",
-                    "object"
+                    "force"
                 ],
-                "rgb": [],
+                "rgb": [
+                    "agentview_image"
+                ],
                 "depth": [],
                 "scan": []
             },

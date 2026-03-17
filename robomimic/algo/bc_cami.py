@@ -75,6 +75,9 @@ class BC_CaMI(BC):
         """
         input_batch = super(BC_CaMI, self).process_batch_for_training(batch)
 
+        print("obs keys:", batch["obs"].keys())
+        print("force shape before processing:", batch["obs"]["force"].shape)
+
         # Optional CaMI fields - only included if dataset already provides them
         if "contact_label" in batch:
             input_batch["contact_label"] = TensorUtils.to_device(
@@ -91,6 +94,7 @@ class BC_CaMI(BC):
                 TensorUtils.to_device(batch["neg_future_obs"], self.device)
             )
 
+        print("force shape after processing:", input_batch["obs"]["force"].shape)
         return input_batch
 
     def train_on_batch(self, batch, epoch, validate=False):

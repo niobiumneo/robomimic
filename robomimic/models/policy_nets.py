@@ -23,6 +23,93 @@ from robomimic.models.vae_nets import VAE
 from robomimic.models.distributions import TanhWrappedDistribution
 
 
+# class ActorNetwork(MIMO_MLP):
+#     """
+#     A basic policy network that predicts actions from observations.
+#     Can optionally be goal conditioned on future observations.
+#     """
+#     def __init__(
+#         self,
+#         obs_shapes,
+#         ac_dim,
+#         mlp_layer_dims,
+#         goal_shapes=None,
+#         encoder_kwargs=None,
+#     ):
+#         """
+#         Args:
+#             obs_shapes (OrderedDict): a dictionary that maps observation keys to
+#                 expected shapes for observations.
+
+#             ac_dim (int): dimension of action space.
+
+#             mlp_layer_dims ([int]): sequence of integers for the MLP hidden layers sizes.
+
+#             goal_shapes (OrderedDict): a dictionary that maps observation keys to
+#                 expected shapes for goal observations.
+
+#             encoder_kwargs (dict or None): If None, results in default encoder_kwargs being applied. Otherwise, should
+#                 be nested dictionary containing relevant per-observation key information for encoder networks.
+#                 Should be of form:
+
+#                 obs_modality1: dict
+#                     feature_dimension: int
+#                     core_class: str
+#                     core_kwargs: dict
+#                         ...
+#                         ...
+#                     obs_randomizer_class: str
+#                     obs_randomizer_kwargs: dict
+#                         ...
+#                         ...
+#                 obs_modality2: dict
+#                     ...
+#         """
+#         assert isinstance(obs_shapes, OrderedDict)
+#         self.obs_shapes = obs_shapes
+#         self.ac_dim = ac_dim
+
+#         # set up different observation groups for @MIMO_MLP
+#         observation_group_shapes = OrderedDict()
+#         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
+
+#         self._is_goal_conditioned = False
+#         if goal_shapes is not None and len(goal_shapes) > 0:
+#             assert isinstance(goal_shapes, OrderedDict)
+#             self._is_goal_conditioned = True
+#             self.goal_shapes = OrderedDict(goal_shapes)
+#             observation_group_shapes["goal"] = OrderedDict(self.goal_shapes)
+#         else:
+#             self.goal_shapes = OrderedDict()
+
+#         output_shapes = self._get_output_shapes()
+#         super(ActorNetwork, self).__init__(
+#             input_obs_group_shapes=observation_group_shapes,
+#             output_shapes=output_shapes,
+#             layer_dims=mlp_layer_dims,
+#             encoder_kwargs=encoder_kwargs,
+#         )
+
+#     def _get_output_shapes(self):
+#         """
+#         Allow subclasses to re-define outputs from @MIMO_MLP, since we won't
+#         always directly predict actions, but may instead predict the parameters
+#         of a action distribution.
+#         """
+#         return OrderedDict(action=(self.ac_dim,))
+
+#     def output_shape(self, input_shape=None):
+#         return [self.ac_dim]
+
+#     def forward(self, obs_dict, goal_dict=None):
+#         actions = super(ActorNetwork, self).forward(obs=obs_dict, goal=goal_dict)["action"]
+#         # apply tanh squashing to ensure actions are in [-1, 1]
+#         return torch.tanh(actions)
+
+#     def _to_string(self):
+#         """Info to pretty print."""
+#         return "action_dim={}".format(self.ac_dim)
+
 class ActorNetwork(MIMO_MLP):
     """
     A basic policy network that predicts actions from observations.
@@ -50,26 +137,11 @@ class ActorNetwork(MIMO_MLP):
 
             encoder_kwargs (dict or None): If None, results in default encoder_kwargs being applied. Otherwise, should
                 be nested dictionary containing relevant per-observation key information for encoder networks.
-                Should be of form:
-
-                obs_modality1: dict
-                    feature_dimension: int
-                    core_class: str
-                    core_kwargs: dict
-                        ...
-                        ...
-                    obs_randomizer_class: str
-                    obs_randomizer_kwargs: dict
-                        ...
-                        ...
-                obs_modality2: dict
-                    ...
         """
         assert isinstance(obs_shapes, OrderedDict)
         self.obs_shapes = obs_shapes
         self.ac_dim = ac_dim
 
-        # set up different observation groups for @MIMO_MLP
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
 
@@ -91,20 +163,23 @@ class ActorNetwork(MIMO_MLP):
         )
 
     def _get_output_shapes(self):
-        """
-        Allow subclasses to re-define outputs from @MIMO_MLP, since we won't
-        always directly predict actions, but may instead predict the parameters
-        of a action distribution.
-        """
         return OrderedDict(action=(self.ac_dim,))
 
     def output_shape(self, input_shape=None):
         return [self.ac_dim]
 
+    def forward_features(self, obs_dict, goal_dict=None):
+        feat = MIMO_MLP.forward_features(self, obs=obs_dict, goal=goal_dict)
+        return feat
+
+    def forward_with_features(self, obs_dict, goal_dict=None):
+        out, feat = MIMO_MLP.forward_with_features(self, obs=obs_dict, goal=goal_dict)
+        actions = torch.tanh(out["action"])
+        return actions, feat
+
     def forward(self, obs_dict, goal_dict=None):
-        actions = super(ActorNetwork, self).forward(obs=obs_dict, goal=goal_dict)["action"]
-        # apply tanh squashing to ensure actions are in [-1, 1]
-        return torch.tanh(actions)
+        actions, _ = self.forward_with_features(obs_dict=obs_dict, goal_dict=goal_dict)
+        return actions
 
     def _to_string(self):
         """Info to pretty print."""

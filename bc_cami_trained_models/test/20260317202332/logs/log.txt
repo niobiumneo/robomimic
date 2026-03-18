@@ -1,0 +1,377 @@
+
+============= Initialized Observation Utils with Obs Spec =============
+
+using obs modality: low_dim with keys: ['robot0_eef_pos', 'force', 'robot0_eef_quat']
+using obs modality: rgb with keys: ['agentview_image']
+using obs modality: depth with keys: []
+using obs modality: scan with keys: []
+
+============= Loaded Environment Metadata =============
+obs key agentview_image with shape (224, 224, 3)
+obs key force with shape (6,)
+obs key robot0_eef_pos with shape (3,)
+obs key robot0_eef_quat with shape (4,)
+[robosuite WARNING] No private macro file found! (macros.py:58)
+[robosuite WARNING] It is recommended to use a private macro file (macros.py:59)
+[robosuite WARNING] To setup, run: python /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite/robosuite/scripts/setup_macros.py (macros.py:60)
+[robosuite WARNING] The config has defined for the controller "left", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for left from self.part_controller_config. (robot.py:151)
+WARNING:robosuite_logs:The config has defined for the controller "left", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for left from self.part_controller_config.
+[robosuite WARNING] The config has defined for the controller "torso", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for torso from self.part_controller_config. (robot.py:151)
+WARNING:robosuite_logs:The config has defined for the controller "torso", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for torso from self.part_controller_config.
+[robosuite WARNING] The config has defined for the controller "head", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for head from self.part_controller_config. (robot.py:151)
+WARNING:robosuite_logs:The config has defined for the controller "head", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for head from self.part_controller_config.
+[robosuite WARNING] The config has defined for the controller "base", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for base from self.part_controller_config. (robot.py:151)
+WARNING:robosuite_logs:The config has defined for the controller "base", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for base from self.part_controller_config.
+[robosuite WARNING] The config has defined for the controller "legs", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for legs from self.part_controller_config. (robot.py:151)
+WARNING:robosuite_logs:The config has defined for the controller "legs", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for legs from self.part_controller_config.
+Created environment with name Wipe
+Action size is 6
+ROBOMIMIC WARNING(
+    No environment version found in dataset!
+    Cannot verify if dataset and installed environment versions match
+)
+Wipe
+{
+    "camera_depths": false,
+    "controller_configs": {
+        "body_parts": {
+            "base": {
+                "interpolation": "null",
+                "type": "JOINT_VELOCITY"
+            },
+            "head": {
+                "input_max": 1,
+                "input_min": -1,
+                "interpolation": null,
+                "kd": 200,
+                "kp": 1000,
+                "kp_limits": [
+                    0,
+                    1000
+                ],
+                "kv": 200,
+                "output_max": 0.5,
+                "output_min": -0.5,
+                "ramp_ratio": 0.2,
+                "type": "JOINT_POSITION",
+                "velocity_limits": [
+                    -1,
+                    1
+                ]
+            },
+            "left": {
+                "damping_ratio": 1,
+                "damping_ratio_limits": [
+                    0,
+                    10
+                ],
+                "gripper": {
+                    "type": "GRIP"
+                },
+                "impedance_mode": "fixed",
+                "input_max": 1,
+                "input_min": -1,
+                "input_ref_frame": "base",
+                "input_type": "delta",
+                "interpolation": null,
+                "kp": 150,
+                "kp_limits": [
+                    0,
+                    300
+                ],
+                "orientation_limits": null,
+                "output_max": [
+                    0.05,
+                    0.05,
+                    0.05,
+                    0.5,
+                    0.5,
+                    0.5
+                ],
+                "output_min": [
+                    -0.05,
+                    -0.05,
+                    -0.05,
+                    -0.5,
+                    -0.5,
+                    -0.5
+                ],
+                "position_limits": null,
+                "ramp_ratio": 0.2,
+                "type": "OSC_POSE",
+                "uncouple_pos_ori": true
+            },
+            "legs": {
+                "input_max": 1,
+                "input_min": -1,
+                "interpolation": null,
+                "kd": 200,
+                "kp": 1000,
+                "kp_limits": [
+                    0,
+                    1000
+                ],
+                "kv": 200,
+                "output_max": 0.5,
+                "output_min": -0.5,
+                "ramp_ratio": 0.2,
+                "type": "JOINT_POSITION",
+                "velocity_limits": [
+                    -1,
+                    1
+                ]
+            },
+            "right": {
+                "damping_ratio": 1,
+                "damping_ratio_limits": [
+                    0,
+                    10
+                ],
+                "gripper": {
+                    "type": "GRIP"
+                },
+                "impedance_mode": "fixed",
+                "input_max": 1,
+                "input_min": -1,
+                "input_ref_frame": "base",
+                "input_type": "delta",
+                "interpolation": null,
+                "kp": 150,
+                "kp_limits": [
+                    0,
+                    300
+                ],
+                "orientation_limits": null,
+                "output_max": [
+                    0.05,
+                    0.05,
+                    0.05,
+                    0.5,
+                    0.5,
+                    0.5
+                ],
+                "output_min": [
+                    -0.05,
+                    -0.05,
+                    -0.05,
+                    -0.5,
+                    -0.5,
+                    -0.5
+                ],
+                "position_limits": null,
+                "ramp_ratio": 0.2,
+                "type": "OSC_POSE",
+                "uncouple_pos_ori": true
+            },
+            "torso": {
+                "input_max": 1,
+                "input_min": -1,
+                "interpolation": null,
+                "kd": 200,
+                "kp": 1000,
+                "kp_limits": [
+                    0,
+                    1000
+                ],
+                "kv": 200,
+                "output_max": 0.5,
+                "output_min": -0.5,
+                "ramp_ratio": 0.2,
+                "type": "JOINT_POSITION",
+                "velocity_limits": [
+                    -1,
+                    1
+                ]
+            }
+        },
+        "type": "BASIC"
+    },
+    "has_offscreen_renderer": true,
+    "has_renderer": false,
+    "ignore_done": true,
+    "render_gpu_device_id": 0,
+    "robots": "Panda",
+    "use_camera_obs": true,
+    "use_object_obs": true
+}
+
+SequenceDataset: loading dataset into memory...
+  0%|          | 0/20 [00:00<?, ?it/s]  5%|5         | 1/20 [00:00<00:05,  3.28it/s] 10%|#         | 2/20 [00:00<00:07,  2.51it/s] 15%|#5        | 3/20 [00:01<00:06,  2.49it/s] 20%|##        | 4/20 [00:01<00:05,  2.70it/s] 25%|##5       | 5/20 [00:01<00:05,  2.82it/s] 30%|###       | 6/20 [00:02<00:04,  2.81it/s] 35%|###5      | 7/20 [00:02<00:04,  2.72it/s] 40%|####      | 8/20 [00:02<00:04,  2.98it/s] 45%|####5     | 9/20 [00:03<00:03,  2.99it/s] 50%|#####     | 10/20 [00:03<00:03,  3.32it/s] 55%|#####5    | 11/20 [00:03<00:02,  3.13it/s] 60%|######    | 12/20 [00:03<00:02,  3.45it/s] 65%|######5   | 13/20 [00:04<00:02,  2.97it/s] 70%|#######   | 14/20 [00:04<00:01,  3.21it/s] 75%|#######5  | 15/20 [00:04<00:01,  3.35it/s] 80%|########  | 16/20 [00:05<00:01,  3.74it/s] 85%|########5 | 17/20 [00:05<00:00,  3.20it/s] 90%|######### | 18/20 [00:06<00:00,  2.61it/s] 95%|#########5| 19/20 [00:06<00:00,  2.76it/s]100%|##########| 20/20 [00:06<00:00,  2.55it/s]100%|##########| 20/20 [00:06<00:00,  2.90it/s]
+SequenceDataset: caching get_item calls...
+  0%|          | 0/8910 [00:00<?, ?it/s]SequenceDataset: computing action statistics...
+
+  0%|          | 0/19 [00:00<?, ?it/s][A100%|##########| 19/19 [00:00<00:00, 4914.09it/s]
+  3%|3         | 268/8910 [00:00<00:03, 2676.91it/s]  6%|6         | 548/8910 [00:00<00:03, 2745.05it/s]  9%|9         | 828/8910 [00:00<00:02, 2768.16it/s] 12%|#2        | 1112/8910 [00:00<00:02, 2792.70it/s] 16%|#5        | 1396/8910 [00:00<00:02, 2806.85it/s] 19%|#8        | 1678/8910 [00:00<00:02, 2809.34it/s] 22%|##1       | 1960/8910 [00:00<00:02, 2810.33it/s] 25%|##5       | 2242/8910 [00:00<00:02, 2808.11it/s] 28%|##8       | 2523/8910 [00:00<00:02, 2761.94it/s] 31%|###1      | 2806/8910 [00:01<00:02, 2782.59it/s] 35%|###4      | 3091/8910 [00:01<00:02, 2802.04it/s] 38%|###7      | 3378/8910 [00:01<00:01, 2822.03it/s] 41%|####1     | 3665/8910 [00:01<00:01, 2834.73it/s] 44%|####4     | 3953/8910 [00:01<00:01, 2847.47it/s] 48%|####7     | 4240/8910 [00:01<00:01, 2854.17it/s] 51%|#####     | 4528/8910 [00:01<00:01, 2859.09it/s] 54%|#####4    | 4814/8910 [00:01<00:01, 2845.78it/s] 57%|#####7    | 5099/8910 [00:01<00:01, 2845.40it/s] 60%|######    | 5384/8910 [00:01<00:01, 2829.89it/s] 64%|######3   | 5668/8910 [00:02<00:01, 2818.64it/s] 67%|######6   | 5953/8910 [00:02<00:01, 2827.48it/s] 70%|#######   | 6240/8910 [00:02<00:00, 2837.14it/s] 73%|#######3  | 6529/8910 [00:02<00:00, 2851.95it/s] 77%|#######6  | 6818/8910 [00:02<00:00, 2861.16it/s] 80%|#######9  | 7105/8910 [00:02<00:00, 2856.41it/s] 83%|########2 | 7391/8910 [00:02<00:00, 2843.79it/s] 86%|########6 | 7676/8910 [00:02<00:00, 2841.51it/s] 89%|########9 | 7961/8910 [00:02<00:00, 2843.18it/s] 93%|#########2| 8246/8910 [00:02<00:00, 2834.89it/s] 96%|#########5| 8530/8910 [00:03<00:00, 2797.53it/s] 99%|#########8| 8811/8910 [00:03<00:00, 2798.95it/s]100%|##########| 8910/8910 [00:03<00:00, 2820.08it/s]
+
+============= Training Dataset =============
+SequenceDataset (
+	path=/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite_datasets/table_wiping/1772931257_163442/demo.hdf5
+	obs_keys=('agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat')
+	seq_length=1
+	filter_key=none
+	frame_stack=1
+	pad_seq_length=True
+	pad_frame_stack=True
+	goal_mode=none
+	cache_mode=all
+	num_demos=20
+	num_sequences=8910
+)
+
+
+============= Model Summary =============
+ObservationKeyToModalityDict: action not found, adding action to mapping with assumed low_dim modality!
+BC_CaMI (
+  ModuleDict(
+    (policy): ActorNetwork(
+        action_dim=6
+  
+        encoder=ObservationGroupEncoder(
+            group=obs
+            ObservationEncoder(
+                Key(
+                    name=agentview_image
+                    shape=[3, 224, 224]
+                    modality=rgb
+                    randomizer=ModuleList(
+                      (0): None
+                    )
+                    net=VisualCore(
+                      input_shape=[3, 224, 224]
+                      output_shape=[64]
+                      backbone_net=ResNet18Conv(input_channel=3, input_coord_conv=False)
+                      pool_net=SpatialSoftmax(num_kp=32, temperature=1.0, noise=0.0)
+                    )
+                    sharing_from=None
+                )
+                Key(
+                    name=force
+                    shape=[6]
+                    modality=low_dim
+                    randomizer=ModuleList(
+                      (0): None
+                    )
+                    net=None
+                    sharing_from=None
+                )
+                Key(
+                    name=robot0_eef_pos
+                    shape=[3]
+                    modality=low_dim
+                    randomizer=ModuleList(
+                      (0): None
+                    )
+                    net=None
+                    sharing_from=None
+                )
+                Key(
+                    name=robot0_eef_quat
+                    shape=[4]
+                    modality=low_dim
+                    randomizer=ModuleList(
+                      (0): None
+                    )
+                    net=None
+                    sharing_from=None
+                )
+                output_shape=[77]
+            )
+        )
+  
+        mlp=MLP(
+            input_dim=77
+            output_dim=1024
+            layer_dims=[1024]
+            layer_func=Linear
+            dropout=None
+            act=ReLU
+            output_act=ReLU
+        )
+  
+        decoder=ObservationDecoder(
+            Key(
+                name=action
+                shape=(6,)
+                modality=low_dim
+                net=(Linear(in_features=1024, out_features=6, bias=True))
+            )
+        )
+    )
+    (query_proj): Sequential(
+      (0): Linear(in_features=1024, out_features=128, bias=True)
+      (1): ReLU()
+      (2): Linear(in_features=128, out_features=128, bias=True)
+    )
+    (snippet_encoder): Identity()
+    (key_proj): Identity()
+    (snippet_encoder_target): Identity()
+    (key_proj_target): Identity()
+  )
+)
+
+**************************************************
+Warnings generated by robomimic have been duplicated here (from above) for convenience. Please check them carefully.
+ROBOMIMIC WARNING(
+    No environment version found in dataset!
+    Cannot verify if dataset and installed environment versions match
+)
+**************************************************
+
+  0%|          | 0/100 [00:00<?, ?it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+[BC_CaMI DEBUG] anchor_feat shape: (100, 1024)
+[BC_CaMI DEBUG] query_embedding shape: (100, 128)
+[BC_CaMI DEBUG] actions shape: (100, 6)
+[BC_CaMI DEBUG] target actions shape: (100, 6)
+  1%|1         | 1/100 [00:06<10:06,  6.13s/it]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+  2%|2         | 2/100 [00:06<04:15,  2.61s/it]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+  3%|3         | 3/100 [00:06<02:23,  1.48s/it]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+  4%|4         | 4/100 [00:06<01:31,  1.05it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+  5%|5         | 5/100 [00:06<01:02,  1.51it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+  6%|6         | 6/100 [00:06<00:45,  2.06it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+  7%|7         | 7/100 [00:06<00:34,  2.67it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+  8%|8         | 8/100 [00:07<00:27,  3.31it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+  9%|9         | 9/100 [00:07<00:22,  3.96it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+ 10%|#         | 10/100 [00:07<00:19,  4.56it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+ 11%|#1        | 11/100 [00:07<00:17,  5.08it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+ 12%|#2        | 12/100 [00:07<00:15,  5.52it/s]obs keys: dict_keys(['agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat'])
+force shape before processing: torch.Size([100, 1, 6])
+force shape after processing: torch.Size([100, 6])
+ 12%|#2        | 12/100 [00:07<00:57,  1.54it/s]
+Traceback (most recent call last):
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 567, in <module>
+    main(args)
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 511, in main
+    train(config, device=device, resume=args.resume)
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 298, in train
+    step_log = TrainUtils.run_epoch(
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/utils/train_utils.py", line 696, in run_epoch
+    info = model.train_on_batch(input_batch, epoch, validate=validate)
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/algo/bc_cami.py", line 127, in train_on_batch
+    predictions = self._forward_training(batch)
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/algo/bc_cami.py", line 163, in _forward_training
+    predictions["cami_loss"] = torch.tensor(0.0, device=self.device)
+KeyboardInterrupt

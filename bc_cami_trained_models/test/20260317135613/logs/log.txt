@@ -1,1049 +1,0 @@
-
-============= Initialized Observation Utils with Obs Spec =============
-
-using obs modality: low_dim with keys: ['force']
-using obs modality: rgb with keys: ['agentview_image']
-using obs modality: depth with keys: []
-using obs modality: scan with keys: []
-
-============= Loaded Environment Metadata =============
-obs key agentview_image with shape (224, 224, 3)
-obs key force with shape (6,)
-[robosuite WARNING] No private macro file found! (macros.py:58)
-[robosuite WARNING] It is recommended to use a private macro file (macros.py:59)
-[robosuite WARNING] To setup, run: python /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite/robosuite/scripts/setup_macros.py (macros.py:60)
-[robosuite WARNING] The config has defined for the controller "left", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for left from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "left", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for left from self.part_controller_config.
-[robosuite WARNING] The config has defined for the controller "torso", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for torso from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "torso", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for torso from self.part_controller_config.
-[robosuite WARNING] The config has defined for the controller "head", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for head from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "head", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for head from self.part_controller_config.
-[robosuite WARNING] The config has defined for the controller "base", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for base from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "base", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for base from self.part_controller_config.
-[robosuite WARNING] The config has defined for the controller "legs", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for legs from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "legs", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for legs from self.part_controller_config.
-Created environment with name Wipe
-Action size is 6
-ROBOMIMIC WARNING(
-    No environment version found in dataset!
-    Cannot verify if dataset and installed environment versions match
-)
-Wipe
-{
-    "camera_depths": false,
-    "controller_configs": {
-        "body_parts": {
-            "base": {
-                "interpolation": "null",
-                "type": "JOINT_VELOCITY"
-            },
-            "head": {
-                "input_max": 1,
-                "input_min": -1,
-                "interpolation": null,
-                "kd": 200,
-                "kp": 1000,
-                "kp_limits": [
-                    0,
-                    1000
-                ],
-                "kv": 200,
-                "output_max": 0.5,
-                "output_min": -0.5,
-                "ramp_ratio": 0.2,
-                "type": "JOINT_POSITION",
-                "velocity_limits": [
-                    -1,
-                    1
-                ]
-            },
-            "left": {
-                "damping_ratio": 1,
-                "damping_ratio_limits": [
-                    0,
-                    10
-                ],
-                "gripper": {
-                    "type": "GRIP"
-                },
-                "impedance_mode": "fixed",
-                "input_max": 1,
-                "input_min": -1,
-                "input_ref_frame": "base",
-                "input_type": "delta",
-                "interpolation": null,
-                "kp": 150,
-                "kp_limits": [
-                    0,
-                    300
-                ],
-                "orientation_limits": null,
-                "output_max": [
-                    0.05,
-                    0.05,
-                    0.05,
-                    0.5,
-                    0.5,
-                    0.5
-                ],
-                "output_min": [
-                    -0.05,
-                    -0.05,
-                    -0.05,
-                    -0.5,
-                    -0.5,
-                    -0.5
-                ],
-                "position_limits": null,
-                "ramp_ratio": 0.2,
-                "type": "OSC_POSE",
-                "uncouple_pos_ori": true
-            },
-            "legs": {
-                "input_max": 1,
-                "input_min": -1,
-                "interpolation": null,
-                "kd": 200,
-                "kp": 1000,
-                "kp_limits": [
-                    0,
-                    1000
-                ],
-                "kv": 200,
-                "output_max": 0.5,
-                "output_min": -0.5,
-                "ramp_ratio": 0.2,
-                "type": "JOINT_POSITION",
-                "velocity_limits": [
-                    -1,
-                    1
-                ]
-            },
-            "right": {
-                "damping_ratio": 1,
-                "damping_ratio_limits": [
-                    0,
-                    10
-                ],
-                "gripper": {
-                    "type": "GRIP"
-                },
-                "impedance_mode": "fixed",
-                "input_max": 1,
-                "input_min": -1,
-                "input_ref_frame": "base",
-                "input_type": "delta",
-                "interpolation": null,
-                "kp": 150,
-                "kp_limits": [
-                    0,
-                    300
-                ],
-                "orientation_limits": null,
-                "output_max": [
-                    0.05,
-                    0.05,
-                    0.05,
-                    0.5,
-                    0.5,
-                    0.5
-                ],
-                "output_min": [
-                    -0.05,
-                    -0.05,
-                    -0.05,
-                    -0.5,
-                    -0.5,
-                    -0.5
-                ],
-                "position_limits": null,
-                "ramp_ratio": 0.2,
-                "type": "OSC_POSE",
-                "uncouple_pos_ori": true
-            },
-            "torso": {
-                "input_max": 1,
-                "input_min": -1,
-                "interpolation": null,
-                "kd": 200,
-                "kp": 1000,
-                "kp_limits": [
-                    0,
-                    1000
-                ],
-                "kv": 200,
-                "output_max": 0.5,
-                "output_min": -0.5,
-                "ramp_ratio": 0.2,
-                "type": "JOINT_POSITION",
-                "velocity_limits": [
-                    -1,
-                    1
-                ]
-            }
-        },
-        "type": "BASIC"
-    },
-    "has_offscreen_renderer": true,
-    "has_renderer": false,
-    "ignore_done": true,
-    "render_gpu_device_id": 0,
-    "robots": "Panda",
-    "use_camera_obs": true,
-    "use_object_obs": true
-}
-
-SequenceDataset: loading dataset into memory...
-  0%|          | 0/20 [00:00<?, ?it/s]  5%|5         | 1/20 [00:00<00:06,  3.07it/s] 10%|#         | 2/20 [00:00<00:07,  2.43it/s] 15%|#5        | 3/20 [00:01<00:07,  2.42it/s] 20%|##        | 4/20 [00:01<00:06,  2.63it/s] 25%|##5       | 5/20 [00:01<00:05,  2.76it/s] 30%|###       | 6/20 [00:02<00:05,  2.75it/s] 35%|###5      | 7/20 [00:02<00:04,  2.66it/s] 40%|####      | 8/20 [00:02<00:04,  2.87it/s] 45%|####5     | 9/20 [00:03<00:03,  2.89it/s] 50%|#####     | 10/20 [00:03<00:03,  3.23it/s] 55%|#####5    | 11/20 [00:03<00:02,  3.07it/s] 60%|######    | 12/20 [00:04<00:02,  3.38it/s] 65%|######5   | 13/20 [00:04<00:02,  2.92it/s] 70%|#######   | 14/20 [00:04<00:01,  3.17it/s] 75%|#######5  | 15/20 [00:05<00:01,  3.28it/s] 80%|########  | 16/20 [00:05<00:01,  3.65it/s] 85%|########5 | 17/20 [00:05<00:00,  3.11it/s] 90%|######### | 18/20 [00:06<00:00,  2.57it/s] 95%|#########5| 19/20 [00:06<00:00,  2.70it/s]100%|##########| 20/20 [00:07<00:00,  2.49it/s]100%|##########| 20/20 [00:07<00:00,  2.84it/s]
-SequenceDataset: caching get_item calls...
-  0%|          | 0/8910 [00:00<?, ?it/s]SequenceDataset: computing action statistics...
-
-  0%|          | 0/19 [00:00<?, ?it/s][A100%|##########| 19/19 [00:00<00:00, 4820.16it/s]
-  3%|3         | 274/8910 [00:00<00:03, 2729.67it/s]  6%|6         | 560/8910 [00:00<00:02, 2800.34it/s]  9%|9         | 841/8910 [00:00<00:02, 2763.64it/s] 13%|#2        | 1128/8910 [00:00<00:02, 2803.00it/s] 16%|#5        | 1418/8910 [00:00<00:02, 2836.27it/s] 19%|#9        | 1708/8910 [00:00<00:02, 2857.11it/s] 22%|##2       | 1999/8910 [00:00<00:02, 2874.14it/s] 26%|##5       | 2291/8910 [00:00<00:02, 2888.32it/s] 29%|##8       | 2580/8910 [00:00<00:02, 2876.76it/s] 32%|###2      | 2868/8910 [00:01<00:02, 2876.15it/s] 35%|###5      | 3160/8910 [00:01<00:01, 2887.26it/s] 39%|###8      | 3449/8910 [00:01<00:01, 2887.70it/s] 42%|####1     | 3741/8910 [00:01<00:01, 2895.77it/s] 45%|####5     | 4035/8910 [00:01<00:01, 2907.29it/s] 49%|####8     | 4331/8910 [00:01<00:01, 2921.95it/s] 52%|#####1    | 4625/8910 [00:01<00:01, 2925.60it/s] 55%|#####5    | 4920/8910 [00:01<00:01, 2930.63it/s] 59%|#####8    | 5214/8910 [00:01<00:01, 2923.78it/s] 62%|######1   | 5507/8910 [00:01<00:01, 2897.55it/s] 65%|######5   | 5797/8910 [00:02<00:01, 2878.88it/s] 68%|######8   | 6085/8910 [00:02<00:00, 2878.97it/s] 72%|#######1  | 6374/8910 [00:02<00:00, 2881.60it/s] 75%|#######4  | 6663/8910 [00:02<00:00, 2881.27it/s] 78%|#######8  | 6952/8910 [00:02<00:00, 2879.82it/s] 81%|########1 | 7243/8910 [00:02<00:00, 2888.21it/s] 85%|########4 | 7532/8910 [00:02<00:00, 2886.12it/s] 88%|########7 | 7821/8910 [00:02<00:00, 2873.92it/s] 91%|#########1| 8109/8910 [00:02<00:00, 2854.75it/s] 94%|#########4| 8395/8910 [00:02<00:00, 2824.81it/s] 97%|#########7| 8678/8910 [00:03<00:00, 2796.71it/s]100%|##########| 8910/8910 [00:03<00:00, 2865.99it/s]
-
-============= Training Dataset =============
-SequenceDataset (
-	path=/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite_datasets/table_wiping/1772931257_163442/demo.hdf5
-	obs_keys=('agentview_image', 'force')
-	seq_length=1
-	filter_key=none
-	frame_stack=1
-	pad_seq_length=True
-	pad_frame_stack=True
-	goal_mode=none
-	cache_mode=all
-	num_demos=20
-	num_sequences=8910
-)
-
-
-============= Model Summary =============
-ObservationKeyToModalityDict: action not found, adding action to mapping with assumed low_dim modality!
-BC_CaMI (
-  ModuleDict(
-    (policy): ActorNetwork(
-        action_dim=6
-  
-        encoder=ObservationGroupEncoder(
-            group=obs
-            ObservationEncoder(
-                Key(
-                    name=agentview_image
-                    shape=[3, 224, 224]
-                    modality=rgb
-                    randomizer=ModuleList(
-                      (0): None
-                    )
-                    net=VisualCore(
-                      input_shape=[3, 224, 224]
-                      output_shape=[64]
-                      backbone_net=ResNet18Conv(input_channel=3, input_coord_conv=False)
-                      pool_net=SpatialSoftmax(num_kp=32, temperature=1.0, noise=0.0)
-                    )
-                    sharing_from=None
-                )
-                Key(
-                    name=force
-                    shape=[6]
-                    modality=low_dim
-                    randomizer=ModuleList(
-                      (0): None
-                    )
-                    net=None
-                    sharing_from=None
-                )
-                output_shape=[70]
-            )
-        )
-  
-        mlp=MLP(
-            input_dim=70
-            output_dim=1024
-            layer_dims=[1024]
-            layer_func=Linear
-            dropout=None
-            act=ReLU
-            output_act=ReLU
-        )
-  
-        decoder=ObservationDecoder(
-            Key(
-                name=action
-                shape=(6,)
-                modality=low_dim
-                net=(Linear(in_features=1024, out_features=6, bias=True))
-            )
-        )
-    )
-    (query_proj): Identity()
-    (snippet_encoder): Identity()
-    (key_proj): Identity()
-    (snippet_encoder_target): Identity()
-    (key_proj_target): Identity()
-  )
-)
-
-**************************************************
-Warnings generated by robomimic have been duplicated here (from above) for convenience. Please check them carefully.
-ROBOMIMIC WARNING(
-    No environment version found in dataset!
-    Cannot verify if dataset and installed environment versions match
-)
-**************************************************
-
-  0%|          | 0/100 [00:00<?, ?it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  1%|1         | 1/100 [00:06<10:47,  6.54s/it]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  2%|2         | 2/100 [00:06<04:32,  2.78s/it]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  3%|3         | 3/100 [00:06<02:32,  1.58s/it]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  4%|4         | 4/100 [00:06<01:37,  1.01s/it]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  5%|5         | 5/100 [00:07<01:06,  1.43it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  6%|6         | 6/100 [00:07<00:47,  1.96it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  7%|7         | 7/100 [00:07<00:36,  2.56it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  8%|8         | 8/100 [00:07<00:28,  3.20it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  9%|9         | 9/100 [00:07<00:23,  3.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 10%|#         | 10/100 [00:07<00:20,  4.47it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 11%|#1        | 11/100 [00:07<00:17,  5.02it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 12%|#2        | 12/100 [00:08<00:16,  5.47it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 13%|#3        | 13/100 [00:08<00:14,  5.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 14%|#4        | 14/100 [00:08<00:13,  6.14it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 15%|#5        | 15/100 [00:08<00:13,  6.36it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 16%|#6        | 16/100 [00:08<00:12,  6.52it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 17%|#7        | 17/100 [00:08<00:12,  6.67it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 18%|#8        | 18/100 [00:08<00:12,  6.75it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 19%|#9        | 19/100 [00:09<00:11,  6.79it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 20%|##        | 20/100 [00:09<00:11,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 21%|##1       | 21/100 [00:09<00:11,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 22%|##2       | 22/100 [00:09<00:11,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 23%|##3       | 23/100 [00:09<00:11,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 24%|##4       | 24/100 [00:09<00:11,  6.81it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 25%|##5       | 25/100 [00:10<00:10,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 26%|##6       | 26/100 [00:10<00:10,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 27%|##7       | 27/100 [00:10<00:10,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 28%|##8       | 28/100 [00:10<00:10,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 29%|##9       | 29/100 [00:10<00:10,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 30%|###       | 30/100 [00:10<00:10,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 31%|###1      | 31/100 [00:10<00:10,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 32%|###2      | 32/100 [00:11<00:09,  6.90it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 33%|###3      | 33/100 [00:11<00:09,  6.91it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 34%|###4      | 34/100 [00:11<00:09,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 35%|###5      | 35/100 [00:11<00:09,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 36%|###6      | 36/100 [00:11<00:09,  6.90it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 37%|###7      | 37/100 [00:11<00:09,  6.90it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 38%|###8      | 38/100 [00:11<00:09,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 39%|###9      | 39/100 [00:12<00:08,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 40%|####      | 40/100 [00:12<00:08,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 41%|####1     | 41/100 [00:12<00:08,  6.90it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 42%|####2     | 42/100 [00:12<00:08,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 43%|####3     | 43/100 [00:12<00:08,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 44%|####4     | 44/100 [00:12<00:08,  6.90it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 45%|####5     | 45/100 [00:12<00:07,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 46%|####6     | 46/100 [00:13<00:07,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 47%|####6     | 47/100 [00:13<00:07,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 48%|####8     | 48/100 [00:13<00:07,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 49%|####9     | 49/100 [00:13<00:07,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 50%|#####     | 50/100 [00:13<00:07,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 51%|#####1    | 51/100 [00:13<00:07,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 52%|#####2    | 52/100 [00:13<00:06,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 53%|#####3    | 53/100 [00:14<00:06,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 54%|#####4    | 54/100 [00:14<00:06,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 55%|#####5    | 55/100 [00:14<00:06,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 56%|#####6    | 56/100 [00:14<00:06,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 57%|#####6    | 57/100 [00:14<00:06,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 58%|#####8    | 58/100 [00:14<00:06,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 59%|#####8    | 59/100 [00:14<00:05,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 60%|######    | 60/100 [00:15<00:05,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 61%|######1   | 61/100 [00:15<00:05,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 62%|######2   | 62/100 [00:15<00:05,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 63%|######3   | 63/100 [00:15<00:05,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 64%|######4   | 64/100 [00:15<00:05,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 65%|######5   | 65/100 [00:15<00:05,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 66%|######6   | 66/100 [00:15<00:04,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 67%|######7   | 67/100 [00:16<00:04,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 68%|######8   | 68/100 [00:16<00:04,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 69%|######9   | 69/100 [00:16<00:04,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 70%|#######   | 70/100 [00:16<00:04,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 71%|#######1  | 71/100 [00:16<00:04,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 72%|#######2  | 72/100 [00:16<00:04,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 73%|#######3  | 73/100 [00:16<00:03,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 74%|#######4  | 74/100 [00:17<00:03,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 75%|#######5  | 75/100 [00:17<00:03,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 76%|#######6  | 76/100 [00:17<00:03,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 77%|#######7  | 77/100 [00:17<00:03,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 78%|#######8  | 78/100 [00:17<00:03,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 79%|#######9  | 79/100 [00:17<00:03,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 80%|########  | 80/100 [00:18<00:02,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 81%|########1 | 81/100 [00:18<00:02,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 82%|########2 | 82/100 [00:18<00:02,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 83%|########2 | 83/100 [00:18<00:02,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 84%|########4 | 84/100 [00:18<00:02,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 85%|########5 | 85/100 [00:18<00:02,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 86%|########6 | 86/100 [00:18<00:02,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 87%|########7 | 87/100 [00:19<00:01,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 88%|########8 | 88/100 [00:19<00:01,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 89%|########9 | 89/100 [00:19<00:01,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 90%|######### | 90/100 [00:19<00:01,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 91%|#########1| 91/100 [00:19<00:01,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 92%|#########2| 92/100 [00:19<00:01,  6.90it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 93%|#########3| 93/100 [00:19<00:01,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 94%|#########3| 94/100 [00:20<00:00,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 95%|#########5| 95/100 [00:20<00:00,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 96%|#########6| 96/100 [00:20<00:00,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 97%|#########7| 97/100 [00:20<00:00,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 98%|#########8| 98/100 [00:20<00:00,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 99%|#########9| 99/100 [00:20<00:00,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-100%|##########| 100/100 [00:20<00:00,  6.86it/s]100%|##########| 100/100 [00:20<00:00,  4.78it/s]
-Train Epoch 1
-{
-    "CaMI_Loss": 0.0,
-    "Cosine_Loss": 0.7692862737178803,
-    "L1_Loss": 0.01977233641780913,
-    "L2_Loss": 0.03956567656248808,
-    "Loss": 0.03956567656248808,
-    "Optimizer/policy0_lr": 0.0001,
-    "Policy_Grad_Norms": 0.050090564281738977,
-    "Time_Data_Loading": 0.004588707288106283,
-    "Time_Epoch": 0.34872368971506756,
-    "Time_Log_Info": 0.0028602282206217446,
-    "Time_Process_Batch": 0.0036170482635498047,
-    "Time_Train_Batch": 0.3373986601829529
-}
-
-saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_cami_trained_models/test/20260317135613/last.pth...
-
-save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_cami_trained_models/test/20260317135613/last.pth
-
-saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_cami_trained_models/test/20260317135613/last_bak.pth
-
-
-Epoch 1 Memory Usage: 4649 MB
-
-  0%|          | 0/100 [00:00<?, ?it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  1%|1         | 1/100 [00:00<00:14,  6.96it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  2%|2         | 2/100 [00:00<00:14,  6.92it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  3%|3         | 3/100 [00:00<00:14,  6.92it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  4%|4         | 4/100 [00:00<00:13,  6.92it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  5%|5         | 5/100 [00:00<00:13,  6.92it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  6%|6         | 6/100 [00:00<00:13,  6.91it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  7%|7         | 7/100 [00:01<00:13,  6.86it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  8%|8         | 8/100 [00:01<00:13,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  9%|9         | 9/100 [00:01<00:13,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 10%|#         | 10/100 [00:01<00:13,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 11%|#1        | 11/100 [00:01<00:12,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 12%|#2        | 12/100 [00:01<00:12,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 13%|#3        | 13/100 [00:01<00:12,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 14%|#4        | 14/100 [00:02<00:12,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 15%|#5        | 15/100 [00:02<00:12,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 16%|#6        | 16/100 [00:02<00:12,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 17%|#7        | 17/100 [00:02<00:12,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 18%|#8        | 18/100 [00:02<00:11,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 19%|#9        | 19/100 [00:02<00:11,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 20%|##        | 20/100 [00:02<00:11,  6.76it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 21%|##1       | 21/100 [00:03<00:11,  6.78it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 22%|##2       | 22/100 [00:03<00:11,  6.80it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 23%|##3       | 23/100 [00:03<00:11,  6.81it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 24%|##4       | 24/100 [00:03<00:11,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 25%|##5       | 25/100 [00:03<00:10,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 26%|##6       | 26/100 [00:03<00:10,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 27%|##7       | 27/100 [00:03<00:10,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 28%|##8       | 28/100 [00:04<00:10,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 29%|##9       | 29/100 [00:04<00:10,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 30%|###       | 30/100 [00:04<00:10,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 31%|###1      | 31/100 [00:04<00:10,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 32%|###2      | 32/100 [00:04<00:09,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 33%|###3      | 33/100 [00:04<00:09,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 34%|###4      | 34/100 [00:04<00:09,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 35%|###5      | 35/100 [00:05<00:09,  6.81it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 36%|###6      | 36/100 [00:05<00:09,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 37%|###7      | 37/100 [00:05<00:09,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 38%|###8      | 38/100 [00:05<00:09,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 39%|###9      | 39/100 [00:05<00:08,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 40%|####      | 40/100 [00:05<00:08,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 41%|####1     | 41/100 [00:05<00:08,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 42%|####2     | 42/100 [00:06<00:08,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 43%|####3     | 43/100 [00:06<00:08,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 44%|####4     | 44/100 [00:06<00:08,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 45%|####5     | 45/100 [00:06<00:08,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 46%|####6     | 46/100 [00:06<00:07,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 47%|####6     | 47/100 [00:06<00:07,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 48%|####8     | 48/100 [00:07<00:07,  6.82it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 49%|####9     | 49/100 [00:07<00:07,  6.82it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 50%|#####     | 50/100 [00:07<00:07,  6.82it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 51%|#####1    | 51/100 [00:07<00:07,  6.82it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 52%|#####2    | 52/100 [00:07<00:07,  6.81it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 53%|#####3    | 53/100 [00:07<00:06,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 54%|#####4    | 54/100 [00:07<00:06,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 55%|#####5    | 55/100 [00:08<00:06,  6.85it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 56%|#####6    | 56/100 [00:08<00:06,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 57%|#####6    | 57/100 [00:08<00:06,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 58%|#####8    | 58/100 [00:08<00:06,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 59%|#####8    | 59/100 [00:08<00:05,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 60%|######    | 60/100 [00:08<00:05,  6.82it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 61%|######1   | 61/100 [00:08<00:05,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 62%|######2   | 62/100 [00:09<00:05,  6.83it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 63%|######3   | 63/100 [00:09<00:05,  6.81it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 64%|######4   | 64/100 [00:09<00:05,  6.81it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 65%|######5   | 65/100 [00:09<00:05,  6.80it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 66%|######6   | 66/100 [00:09<00:05,  6.73it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 67%|######7   | 67/100 [00:09<00:04,  6.76it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 68%|######8   | 68/100 [00:09<00:04,  6.76it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 69%|######9   | 69/100 [00:10<00:04,  6.75it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 70%|#######   | 70/100 [00:10<00:04,  6.75it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 71%|#######1  | 71/100 [00:10<00:04,  6.71it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 72%|#######2  | 72/100 [00:10<00:04,  6.62it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 73%|#######3  | 73/100 [00:10<00:04,  6.54it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 74%|#######4  | 74/100 [00:10<00:03,  6.56it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 75%|#######5  | 75/100 [00:11<00:03,  6.59it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 76%|#######6  | 76/100 [00:11<00:03,  6.69it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 77%|#######7  | 77/100 [00:11<00:03,  6.76it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 78%|#######8  | 78/100 [00:11<00:03,  6.79it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 79%|#######9  | 79/100 [00:11<00:03,  6.84it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 80%|########  | 80/100 [00:11<00:02,  6.89it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 81%|########1 | 81/100 [00:11<00:02,  6.88it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 82%|########2 | 82/100 [00:12<00:02,  6.90it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 83%|########2 | 83/100 [00:12<00:02,  6.91it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 84%|########4 | 84/100 [00:12<00:02,  6.93it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 85%|########5 | 85/100 [00:12<00:02,  6.96it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 86%|########6 | 86/100 [00:12<00:02,  6.97it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 87%|########7 | 87/100 [00:12<00:01,  6.97it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 88%|########8 | 88/100 [00:12<00:01,  6.97it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 89%|########9 | 89/100 [00:13<00:01,  6.98it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 90%|######### | 90/100 [00:13<00:01,  6.98it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 91%|#########1| 91/100 [00:13<00:01,  6.95it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 92%|#########2| 92/100 [00:13<00:01,  6.96it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 93%|#########3| 93/100 [00:13<00:01,  6.98it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 94%|#########3| 94/100 [00:13<00:00,  6.87it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 95%|#########5| 95/100 [00:13<00:00,  6.90it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 96%|#########6| 96/100 [00:14<00:00,  6.93it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 97%|#########7| 97/100 [00:14<00:00,  6.95it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 98%|#########8| 98/100 [00:14<00:00,  6.94it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 99%|#########9| 99/100 [00:14<00:00,  6.96it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-100%|##########| 100/100 [00:14<00:00,  6.97it/s]100%|##########| 100/100 [00:14<00:00,  6.84it/s]
-Train Epoch 2
-{
-    "CaMI_Loss": 0.0,
-    "Cosine_Loss": 0.7464743685722351,
-    "L1_Loss": 0.01734052431769669,
-    "L2_Loss": 0.034692745096981524,
-    "Loss": 0.034692745096981524,
-    "Optimizer/policy0_lr": 0.0001,
-    "Policy_Grad_Norms": 0.036474365570034445,
-    "Time_Data_Loading": 0.004316310087839763,
-    "Time_Epoch": 0.24352657000223796,
-    "Time_Log_Info": 0.0028709252675374348,
-    "Time_Process_Batch": 0.003200872739156087,
-    "Time_Train_Batch": 0.23285747369130452
-}
-
-saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_cami_trained_models/test/20260317135613/last.pth...
-
-save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_cami_trained_models/test/20260317135613/last.pth
-
-saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_cami_trained_models/test/20260317135613/last_bak.pth
-
-
-Epoch 2 Memory Usage: 4659 MB
-
-  0%|          | 0/100 [00:00<?, ?it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  1%|1         | 1/100 [00:00<00:13,  7.17it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  2%|2         | 2/100 [00:00<00:13,  7.08it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  3%|3         | 3/100 [00:00<00:13,  7.02it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  4%|4         | 4/100 [00:00<00:13,  7.02it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  5%|5         | 5/100 [00:00<00:13,  7.01it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  6%|6         | 6/100 [00:00<00:13,  7.02it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  7%|7         | 7/100 [00:00<00:13,  7.00it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  8%|8         | 8/100 [00:01<00:13,  6.98it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
-  9%|9         | 9/100 [00:01<00:13,  6.98it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 10%|#         | 10/100 [00:01<00:12,  6.98it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 11%|#1        | 11/100 [00:01<00:12,  6.98it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 12%|#2        | 12/100 [00:01<00:12,  6.97it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 13%|#3        | 13/100 [00:01<00:12,  6.91it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 14%|#4        | 14/100 [00:02<00:12,  6.91it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 15%|#5        | 15/100 [00:02<00:12,  6.92it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 16%|#6        | 16/100 [00:02<00:12,  6.91it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 17%|#7        | 17/100 [00:02<00:11,  6.93it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 18%|#8        | 18/100 [00:02<00:11,  6.94it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 19%|#9        | 19/100 [00:02<00:11,  6.92it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 20%|##        | 20/100 [00:02<00:12,  6.65it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 21%|##1       | 21/100 [00:03<00:12,  6.41it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 22%|##2       | 22/100 [00:03<00:11,  6.53it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 23%|##3       | 23/100 [00:03<00:11,  6.60it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 24%|##4       | 24/100 [00:03<00:11,  6.65it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 25%|##5       | 25/100 [00:03<00:11,  6.70it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 26%|##6       | 26/100 [00:03<00:11,  6.70it/s]obs keys: dict_keys(['agentview_image', 'force'])
-force shape before processing: torch.Size([100, 1, 6])
-force shape after processing: torch.Size([100, 6])
- 26%|##6       | 26/100 [00:03<00:10,  6.73it/s]
-Traceback (most recent call last):
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 567, in <module>
-    main(args)
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 511, in main
-    train(config, device=device, resume=args.resume)
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 298, in train
-    step_log = TrainUtils.run_epoch(
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/utils/train_utils.py", line 696, in run_epoch
-    info = model.train_on_batch(input_batch, epoch, validate=validate)
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/algo/bc_cami.py", line 116, in train_on_batch
-    step_info = self._train_step(losses)
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/algo/bc_cami.py", line 197, in _train_step
-    policy_grad_norms = TorchUtils.backprop_for_loss(
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/utils/torch_utils.py", line 255, in backprop_for_loss
-    loss.backward(retain_graph=retain_graph)
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/_tensor.py", line 630, in backward
-    torch.autograd.backward(
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/autograd/__init__.py", line 364, in backward
-    _engine_run_backward(
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
-    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-KeyboardInterrupt

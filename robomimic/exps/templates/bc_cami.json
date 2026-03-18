@@ -209,6 +209,8 @@
         "modalities": {
             "obs": {
                 "low_dim": [
+                    "robot0_eef_pos",
+                    "robot0_eef_quat",
                     "force"
                 ],
                 "rgb": [

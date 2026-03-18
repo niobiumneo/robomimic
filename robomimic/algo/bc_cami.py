@@ -21,6 +21,16 @@ def algo_config_to_class(algo_config):
     return BC_CaMI, {}
 
 
+def build_mlp(input_dim, hidden_dims, output_dim):
+    layers = []
+    prev_dim = input_dim
+    for h in hidden_dims:
+        layers.append(nn.Linear(prev_dim, h))
+        layers.append(nn.ReLU())
+        prev_dim = h
+    layers.append(nn.Linear(prev_dim, output_dim))
+    return nn.Sequential(*layers)
+
 class BC_CaMI(BC):
     """
     Behavioral Cloning with Contact-aware Mutual Information (CaMI) regularization.
@@ -50,7 +60,15 @@ class BC_CaMI(BC):
         #   - future snippet encoder
         #   - key projection head
         # ------------------------------------------------------------------ #
-        self.nets["query_proj"] = nn.Identity()
+        anchor_dim = self.algo_config.actor_layer_dims[-1]
+        proj_hidden = list(self.algo_config.cami.query_proj_layers)
+        contrastive_dim = self.algo_config.cami.contrastive_dim
+
+        self.nets["query_proj"] = build_mlp(
+            input_dim=anchor_dim,
+            hidden_dims=proj_hidden,
+            output_dim=contrastive_dim,
+        )
         self.nets["snippet_encoder"] = nn.Identity()
         self.nets["key_proj"] = nn.Identity()
 
@@ -129,23 +147,30 @@ class BC_CaMI(BC):
         """
         predictions = OrderedDict()
 
-        # Standard BC action prediction
-        actions = self.nets["policy"](
+        actions, anchor_feat = self.nets["policy"].forward_with_features(
             obs_dict=batch["obs"],
             goal_dict=batch["goal_obs"],
         )
-        predictions["actions"] = actions
 
-        # Placeholder CaMI loss output
+        query_embedding = self.nets["query_proj"](anchor_feat)
+
+        if getattr(self.algo_config.cami, "normalize_embeddings", False):
+            query_embedding = torch.nn.functional.normalize(query_embedding, dim=-1)
+
+        predictions["actions"] = actions
+        predictions["anchor_feat"] = anchor_feat
+        predictions["query_embedding"] = query_embedding
         predictions["cami_loss"] = torch.tensor(0.0, device=self.device)
 
-        # # Placeholder embeddings for future debugging / logging
-        # predictions["query_embedding"] = None
-        # predictions["positive_key_embedding"] = None
-        # predictions["negative_key_embedding"] = None
+        if not hasattr(self, "_printed_anchor_debug"):
+            print("[BC_CaMI DEBUG] anchor_feat shape:", tuple(anchor_feat.shape))
+            print("[BC_CaMI DEBUG] query_embedding shape:", tuple(query_embedding.shape))
+            print("[BC_CaMI DEBUG] actions shape:", tuple(actions.shape))
+            print("[BC_CaMI DEBUG] target actions shape:", tuple(batch["actions"].shape))
+            self._printed_anchor_debug = True
 
         return predictions
-
+    
     def _compute_losses(self, predictions, batch):
         """
         Compute BC loss + CaMI loss.

@@ -636,19 +636,44 @@ class MIMO_MLP(Module):
         """
         return { k : list(self.output_shapes[k]) for k in self.output_shapes }
 
+    # def forward(self, **inputs):
+    #     """
+    #     Process each set of inputs in its own observation group.
+
+    #     Args:
+    #         inputs (dict): a dictionary of dictionaries with one dictionary per
+    #             observation group. Each observation group's dictionary should map
+    #             modality to torch.Tensor batches. Should be consistent with
+    #             @self.input_obs_group_shapes.
+
+    #     Returns:
+    #         outputs (dict): dictionary of output torch.Tensors, that corresponds
+    #             to @self.output_shapes
+    #     """
+    #     enc_outputs = self.nets["encoder"](**inputs)
+    #     mlp_out = self.nets["mlp"](enc_outputs)
+    #     return self.nets["decoder"](mlp_out)
+
+    def forward_features(self, **inputs):
+        """
+        Return fused latent feature before decoder.
+        """
+        enc_outputs = self.nets["encoder"](**inputs)
+        mlp_out = self.nets["mlp"](enc_outputs)
+        return mlp_out
+
+    def forward_with_features(self, **inputs):
+        """
+        Return both decoded outputs and fused latent feature.
+        """
+        enc_outputs = self.nets["encoder"](**inputs)
+        mlp_out = self.nets["mlp"](enc_outputs)
+        outputs = self.nets["decoder"](mlp_out)
+        return outputs, mlp_out
+
     def forward(self, **inputs):
         """
-        Process each set of inputs in its own observation group.
-
-        Args:
-            inputs (dict): a dictionary of dictionaries with one dictionary per
-                observation group. Each observation group's dictionary should map
-                modality to torch.Tensor batches. Should be consistent with
-                @self.input_obs_group_shapes.
-
-        Returns:
-            outputs (dict): dictionary of output torch.Tensors, that corresponds
-                to @self.output_shapes
+        Preserve original behavior.
         """
         enc_outputs = self.nets["encoder"](**inputs)
         mlp_out = self.nets["mlp"](enc_outputs)

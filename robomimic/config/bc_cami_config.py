@@ -155,24 +155,30 @@ class BCCaMIConfig(BCConfig):
 
     def train_config(self):
         super(BCCaMIConfig, self).train_config()
-        self.train.hdf5_load_next_obs = True
+        self.train.hdf5_load_next_obs = False
 
     def observation_config(self):
         super(BCCaMIConfig, self).observation_config()
 
-        # keep your image key
-        if "agentview_image" not in self.observation.modalities.obs.rgb:
-            self.observation.modalities.obs.rgb.append("agentview_image")
+        # # keep your image key
+        # if "agentview_image" not in self.observation.modalities.obs.rgb:
+        #     self.observation.modalities.obs.rgb.append("agentview_image")
 
-        # add synthetic force key as low_dim obs
-        if "force" not in self.observation.modalities.obs.low_dim:
-            self.observation.modalities.obs.low_dim.append("force")
+        # # add synthetic force key as low_dim obs
+        # if "force" not in self.observation.modalities.obs.low_dim:
+        #     self.observation.modalities.obs.low_dim.append("force")
+
+        self.observation.modalities.obs.rgb = ["agentview_image"]
+        self.observation.modalities.obs.low_dim = ["robot0_eef_pos", "robot0_eef_quat", "force"]
+
+        self.observation.modalities.goal.rgb = []
+        self.observation.modalities.goal.low_dim = []
 
 
     def algo_config(self):
         super(BCCaMIConfig, self).algo_config()
 
-        self.algo.cami.enabled = True
+        self.algo.cami.enabled = False
         self.algo.cami.loss_weight = 0.1
         self.algo.cami.temperature = 0.07
         self.algo.cami.loss_type = "paired_infonce"

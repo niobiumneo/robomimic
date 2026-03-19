@@ -2,8 +2,73 @@
 Config for BC + CaMI algorithm.
 """
 
-from robomimic.config.base_config import BaseConfig
 from robomimic.config.bc_config import BCConfig
+from copy import deepcopy
+
+
+class BCCaMIConfig(BCConfig):
+    ALGO_NAME = "bc_cami"
+
+    def train_config(self):
+        super(BCCaMIConfig, self).train_config()
+        self.train.hdf5_load_next_obs = False
+
+    def observation_config(self):
+        super(BCCaMIConfig, self).observation_config()
+
+        # # keep your image key
+        # if "agentview_image" not in self.observation.modalities.obs.rgb:
+        #     self.observation.modalities.obs.rgb.append("agentview_image")
+
+        # # add synthetic force key as low_dim obs
+        # if "force" not in self.observation.modalities.obs.low_dim:
+        #     self.observation.modalities.obs.low_dim.append("force")
+
+        self.observation.modalities.obs.rgb = ["agentview_image"]
+        self.observation.modalities.obs.low_dim = ["robot0_eef_pos", "robot0_eef_quat", "force"]
+
+        self.observation.modalities.goal.rgb = []
+        self.observation.modalities.goal.low_dim = []
+
+
+    def algo_config(self):
+        super(BCCaMIConfig, self).algo_config()
+
+        # make optimizer entries for new CaMI trainable modules
+        self.algo.optim_params.query_proj = deepcopy(self.algo.optim_params.policy)
+        self.algo.optim_params.snippet_encoder = deepcopy(self.algo.optim_params.policy)
+        self.algo.optim_params.key_proj = deepcopy(self.algo.optim_params.policy)
+
+        self.algo.cami.enabled = True
+        self.algo.cami.loss_weight = 0.01
+        self.algo.cami.temperature = 0.07
+        self.algo.cami.loss_type = "paired_infonce"
+
+        self.algo.cami.snippet_horizon = 10
+        self.algo.cami.num_negatives = 1
+        self.algo.cami.opposite_contact_negatives_only = True
+
+        self.algo.cami.use_momentum_target = False
+        self.algo.cami.target_tau = 0.005
+
+        self.algo.cami.image_feature_dim = 128
+        self.algo.cami.force_feature_dim = 128
+        self.algo.cami.fused_feature_dim = 256
+        self.algo.cami.contrastive_dim = 128
+
+        self.algo.cami.anchor_fusion_layers = (256, 256)
+        self.algo.cami.query_proj_layers = (128,)
+        self.algo.cami.key_proj_layers = (128,)
+
+        self.algo.cami.snippet_encoder_type = "lstm"
+        self.algo.cami.snippet_hidden_dim = 256
+        self.algo.cami.snippet_num_layers = 1
+
+        self.algo.cami.image_obs_key = "agentview_image"
+        self.algo.cami.force_obs_key = "force"
+        self.algo.cami.contact_label_key = "contact_label"
+
+        self.algo.cami.normalize_embeddings = True
 
 
 # class BCCaMIConfig(BaseConfig):
@@ -149,63 +214,3 @@ from robomimic.config.bc_config import BCConfig
 
 #         # final embedding normalization before contrastive loss
 #         self.algo.cami.normalize_embeddings = True
-
-class BCCaMIConfig(BCConfig):
-    ALGO_NAME = "bc_cami"
-
-    def train_config(self):
-        super(BCCaMIConfig, self).train_config()
-        self.train.hdf5_load_next_obs = False
-
-    def observation_config(self):
-        super(BCCaMIConfig, self).observation_config()
-
-        # # keep your image key
-        # if "agentview_image" not in self.observation.modalities.obs.rgb:
-        #     self.observation.modalities.obs.rgb.append("agentview_image")
-
-        # # add synthetic force key as low_dim obs
-        # if "force" not in self.observation.modalities.obs.low_dim:
-        #     self.observation.modalities.obs.low_dim.append("force")
-
-        self.observation.modalities.obs.rgb = ["agentview_image"]
-        self.observation.modalities.obs.low_dim = ["robot0_eef_pos", "robot0_eef_quat", "force"]
-
-        self.observation.modalities.goal.rgb = []
-        self.observation.modalities.goal.low_dim = []
-
-
-    def algo_config(self):
-        super(BCCaMIConfig, self).algo_config()
-
-        self.algo.cami.enabled = False
-        self.algo.cami.loss_weight = 0.1
-        self.algo.cami.temperature = 0.07
-        self.algo.cami.loss_type = "paired_infonce"
-
-        self.algo.cami.snippet_horizon = 10
-        self.algo.cami.num_negatives = 1
-        self.algo.cami.opposite_contact_negatives_only = True
-
-        self.algo.cami.use_momentum_target = True
-        self.algo.cami.target_tau = 0.005
-
-        self.algo.cami.image_feature_dim = 128
-        self.algo.cami.force_feature_dim = 128
-        self.algo.cami.fused_feature_dim = 256
-        self.algo.cami.contrastive_dim = 128
-
-        self.algo.cami.anchor_fusion_layers = (256, 256)
-        self.algo.cami.query_proj_layers = (128,)
-        self.algo.cami.key_proj_layers = (128,)
-
-        self.algo.cami.snippet_encoder_type = "lstm"
-        self.algo.cami.snippet_hidden_dim = 256
-        self.algo.cami.snippet_num_layers = 1
-
-        self.algo.cami.image_obs_key = "agentview_image"
-        self.algo.cami.force_obs_key = "force"
-        self.algo.cami.contact_label_key = "contact_label"
-
-        self.algo.cami.normalize_embeddings = True
-

@@ -1,416 +1,0 @@
-
-============= Initialized Observation Utils with Obs Spec =============
-
-using obs modality: low_dim with keys: ['robot0_eef_quat', 'robot0_eef_pos', 'force']
-using obs modality: rgb with keys: ['agentview_image']
-using obs modality: depth with keys: []
-using obs modality: scan with keys: []
-
-============= Loaded Environment Metadata =============
-obs key agentview_image with shape (224, 224, 3)
-obs key force with shape (6,)
-obs key robot0_eef_pos with shape (3,)
-obs key robot0_eef_quat with shape (4,)
-[robosuite WARNING] No private macro file found! (macros.py:58)
-[robosuite WARNING] It is recommended to use a private macro file (macros.py:59)
-[robosuite WARNING] To setup, run: python /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite/robosuite/scripts/setup_macros.py (macros.py:60)
-[robosuite WARNING] The config has defined for the controller "left", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for left from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "left", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for left from self.part_controller_config.
-[robosuite WARNING] The config has defined for the controller "torso", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for torso from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "torso", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for torso from self.part_controller_config.
-[robosuite WARNING] The config has defined for the controller "head", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for head from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "head", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for head from self.part_controller_config.
-[robosuite WARNING] The config has defined for the controller "base", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for base from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "base", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for base from self.part_controller_config.
-[robosuite WARNING] The config has defined for the controller "legs", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for legs from self.part_controller_config. (robot.py:151)
-WARNING:robosuite_logs:The config has defined for the controller "legs", but the robot does not have this component. Skipping, but make sure this is intended.Removing the controller config for legs from self.part_controller_config.
-Created environment with name Wipe
-Action size is 6
-ROBOMIMIC WARNING(
-    No environment version found in dataset!
-    Cannot verify if dataset and installed environment versions match
-)
-Wipe
-{
-    "camera_depths": false,
-    "controller_configs": {
-        "body_parts": {
-            "base": {
-                "interpolation": "null",
-                "type": "JOINT_VELOCITY"
-            },
-            "head": {
-                "input_max": 1,
-                "input_min": -1,
-                "interpolation": null,
-                "kd": 200,
-                "kp": 1000,
-                "kp_limits": [
-                    0,
-                    1000
-                ],
-                "kv": 200,
-                "output_max": 0.5,
-                "output_min": -0.5,
-                "ramp_ratio": 0.2,
-                "type": "JOINT_POSITION",
-                "velocity_limits": [
-                    -1,
-                    1
-                ]
-            },
-            "left": {
-                "damping_ratio": 1,
-                "damping_ratio_limits": [
-                    0,
-                    10
-                ],
-                "gripper": {
-                    "type": "GRIP"
-                },
-                "impedance_mode": "fixed",
-                "input_max": 1,
-                "input_min": -1,
-                "input_ref_frame": "base",
-                "input_type": "delta",
-                "interpolation": null,
-                "kp": 150,
-                "kp_limits": [
-                    0,
-                    300
-                ],
-                "orientation_limits": null,
-                "output_max": [
-                    0.05,
-                    0.05,
-                    0.05,
-                    0.5,
-                    0.5,
-                    0.5
-                ],
-                "output_min": [
-                    -0.05,
-                    -0.05,
-                    -0.05,
-                    -0.5,
-                    -0.5,
-                    -0.5
-                ],
-                "position_limits": null,
-                "ramp_ratio": 0.2,
-                "type": "OSC_POSE",
-                "uncouple_pos_ori": true
-            },
-            "legs": {
-                "input_max": 1,
-                "input_min": -1,
-                "interpolation": null,
-                "kd": 200,
-                "kp": 1000,
-                "kp_limits": [
-                    0,
-                    1000
-                ],
-                "kv": 200,
-                "output_max": 0.5,
-                "output_min": -0.5,
-                "ramp_ratio": 0.2,
-                "type": "JOINT_POSITION",
-                "velocity_limits": [
-                    -1,
-                    1
-                ]
-            },
-            "right": {
-                "damping_ratio": 1,
-                "damping_ratio_limits": [
-                    0,
-                    10
-                ],
-                "gripper": {
-                    "type": "GRIP"
-                },
-                "impedance_mode": "fixed",
-                "input_max": 1,
-                "input_min": -1,
-                "input_ref_frame": "base",
-                "input_type": "delta",
-                "interpolation": null,
-                "kp": 150,
-                "kp_limits": [
-                    0,
-                    300
-                ],
-                "orientation_limits": null,
-                "output_max": [
-                    0.05,
-                    0.05,
-                    0.05,
-                    0.5,
-                    0.5,
-                    0.5
-                ],
-                "output_min": [
-                    -0.05,
-                    -0.05,
-                    -0.05,
-                    -0.5,
-                    -0.5,
-                    -0.5
-                ],
-                "position_limits": null,
-                "ramp_ratio": 0.2,
-                "type": "OSC_POSE",
-                "uncouple_pos_ori": true
-            },
-            "torso": {
-                "input_max": 1,
-                "input_min": -1,
-                "interpolation": null,
-                "kd": 200,
-                "kp": 1000,
-                "kp_limits": [
-                    0,
-                    1000
-                ],
-                "kv": 200,
-                "output_max": 0.5,
-                "output_min": -0.5,
-                "ramp_ratio": 0.2,
-                "type": "JOINT_POSITION",
-                "velocity_limits": [
-                    -1,
-                    1
-                ]
-            }
-        },
-        "type": "BASIC"
-    },
-    "has_offscreen_renderer": true,
-    "has_renderer": false,
-    "ignore_done": true,
-    "render_gpu_device_id": 0,
-    "robots": "Panda",
-    "use_camera_obs": true,
-    "use_object_obs": true
-}
-
-SequenceDataset: loading dataset into memory...
-  0%|          | 0/20 [00:00<?, ?it/s]  5%|5         | 1/20 [00:00<00:06,  2.96it/s] 10%|#         | 2/20 [00:00<00:07,  2.28it/s] 15%|#5        | 3/20 [00:01<00:07,  2.26it/s] 20%|##        | 4/20 [00:01<00:06,  2.45it/s] 25%|##5       | 5/20 [00:01<00:05,  2.62it/s] 30%|###       | 6/20 [00:02<00:05,  2.62it/s] 35%|###5      | 7/20 [00:02<00:05,  2.51it/s] 40%|####      | 8/20 [00:03<00:04,  2.74it/s] 45%|####5     | 9/20 [00:03<00:04,  2.74it/s] 50%|#####     | 10/20 [00:03<00:03,  3.04it/s] 55%|#####5    | 11/20 [00:04<00:03,  2.95it/s] 60%|######    | 12/20 [00:04<00:02,  3.23it/s] 65%|######5   | 13/20 [00:04<00:02,  2.74it/s] 70%|#######   | 14/20 [00:05<00:02,  2.96it/s] 75%|#######5  | 15/20 [00:05<00:01,  3.09it/s] 80%|########  | 16/20 [00:05<00:01,  3.44it/s] 85%|########5 | 17/20 [00:06<00:01,  2.93it/s] 90%|######### | 18/20 [00:06<00:00,  2.42it/s] 95%|#########5| 19/20 [00:06<00:00,  2.54it/s]100%|##########| 20/20 [00:07<00:00,  2.33it/s]100%|##########| 20/20 [00:07<00:00,  2.67it/s]
-SequenceDataset: caching get_item calls...
-  0%|          | 0/8910 [00:00<?, ?it/s]SequenceDataset: computing action statistics...
-
-  0%|          | 0/19 [00:00<?, ?it/s][A100%|##########| 19/19 [00:00<00:00, 4778.54it/s]
-  1%|1         | 107/8910 [00:00<00:08, 1060.61it/s]  2%|2         | 218/8910 [00:00<00:07, 1087.76it/s]  4%|3         | 329/8910 [00:00<00:07, 1093.63it/s]  5%|4         | 439/8910 [00:00<00:07, 1083.74it/s]  6%|6         | 550/8910 [00:00<00:07, 1092.35it/s]  7%|7         | 661/8910 [00:00<00:07, 1096.80it/s]  9%|8         | 772/8910 [00:00<00:07, 1100.86it/s] 10%|9         | 883/8910 [00:00<00:07, 1101.43it/s] 11%|#1        | 994/8910 [00:00<00:07, 1089.31it/s] 12%|#2        | 1104/8910 [00:01<00:07, 1091.89it/s] 14%|#3        | 1216/8910 [00:01<00:07, 1097.72it/s] 15%|#4        | 1327/8910 [00:01<00:06, 1100.37it/s] 16%|#6        | 1438/8910 [00:01<00:06, 1098.14it/s] 17%|#7        | 1548/8910 [00:01<00:06, 1090.71it/s] 19%|#8        | 1660/8910 [00:01<00:06, 1096.77it/s] 20%|#9        | 1771/8910 [00:01<00:06, 1100.19it/s] 21%|##1       | 1883/8910 [00:01<00:06, 1103.60it/s] 22%|##2       | 1994/8910 [00:01<00:06, 1097.75it/s] 24%|##3       | 2105/8910 [00:01<00:06, 1100.38it/s] 25%|##4       | 2216/8910 [00:02<00:06, 1100.77it/s] 26%|##6       | 2327/8910 [00:02<00:05, 1101.83it/s] 27%|##7       | 2438/8910 [00:02<00:05, 1101.33it/s] 29%|##8       | 2549/8910 [00:02<00:05, 1103.29it/s] 30%|##9       | 2660/8910 [00:02<00:05, 1104.04it/s] 31%|###1      | 2772/8910 [00:02<00:05, 1106.26it/s] 32%|###2      | 2883/8910 [00:02<00:05, 1102.86it/s] 34%|###3      | 2995/8910 [00:02<00:05, 1105.66it/s] 35%|###4      | 3106/8910 [00:02<00:05, 1106.26it/s] 36%|###6      | 3217/8910 [00:02<00:05, 1101.36it/s] 37%|###7      | 3328/8910 [00:03<00:05, 1093.56it/s] 39%|###8      | 3440/8910 [00:03<00:04, 1099.13it/s] 40%|###9      | 3552/8910 [00:03<00:04, 1102.40it/s] 41%|####1     | 3663/8910 [00:03<00:04, 1103.47it/s] 42%|####2     | 3774/8910 [00:03<00:04, 1093.62it/s] 44%|####3     | 3885/8910 [00:03<00:04, 1096.92it/s] 45%|####4     | 3996/8910 [00:03<00:04, 1100.17it/s] 46%|####6     | 4107/8910 [00:03<00:04, 1098.58it/s] 47%|####7     | 4218/8910 [00:03<00:04, 1101.15it/s] 49%|####8     | 4330/8910 [00:03<00:04, 1104.97it/s] 50%|####9     | 4441/8910 [00:04<00:04, 1101.85it/s] 51%|#####1    | 4553/8910 [00:04<00:03, 1105.05it/s] 52%|#####2    | 4664/8910 [00:04<00:03, 1106.31it/s] 54%|#####3    | 4775/8910 [00:04<00:03, 1107.39it/s] 55%|#####4    | 4886/8910 [00:04<00:03, 1103.73it/s] 56%|#####6    | 4998/8910 [00:04<00:03, 1106.16it/s] 57%|#####7    | 5109/8910 [00:04<00:03, 1105.96it/s] 59%|#####8    | 5220/8910 [00:04<00:03, 1102.12it/s] 60%|#####9    | 5331/8910 [00:04<00:03, 1101.90it/s] 61%|######1   | 5442/8910 [00:04<00:03, 1103.61it/s] 62%|######2   | 5553/8910 [00:05<00:03, 1095.34it/s] 64%|######3   | 5664/8910 [00:05<00:02, 1096.97it/s] 65%|######4   | 5774/8910 [00:05<00:02, 1095.39it/s] 66%|######6   | 5886/8910 [00:05<00:02, 1099.98it/s] 67%|######7   | 5997/8910 [00:05<00:02, 1093.78it/s] 69%|######8   | 6107/8910 [00:05<00:02, 1093.36it/s] 70%|######9   | 6219/8910 [00:05<00:02, 1098.67it/s] 71%|#######1  | 6330/8910 [00:05<00:02, 1100.33it/s] 72%|#######2  | 6441/8910 [00:05<00:02, 1099.01it/s] 74%|#######3  | 6553/8910 [00:05<00:02, 1104.41it/s] 75%|#######4  | 6664/8910 [00:06<00:02, 1102.33it/s] 76%|#######6  | 6775/8910 [00:06<00:01, 1104.25it/s] 77%|#######7  | 6886/8910 [00:06<00:01, 1104.97it/s] 79%|#######8  | 6997/8910 [00:06<00:01, 1105.26it/s] 80%|#######9  | 7108/8910 [00:06<00:01, 1105.84it/s] 81%|########1 | 7219/8910 [00:06<00:01, 1101.86it/s] 82%|########2 | 7330/8910 [00:06<00:01, 1102.67it/s] 84%|########3 | 7441/8910 [00:06<00:01, 1104.05it/s] 85%|########4 | 7552/8910 [00:06<00:01, 1103.33it/s] 86%|########6 | 7663/8910 [00:06<00:01, 1096.24it/s] 87%|########7 | 7773/8910 [00:07<00:01, 1088.72it/s] 88%|########8 | 7882/8910 [00:07<00:00, 1087.52it/s] 90%|########9 | 7993/8910 [00:07<00:00, 1091.67it/s] 91%|######### | 8104/8910 [00:07<00:00, 1096.39it/s] 92%|#########2| 8214/8910 [00:07<00:00, 1096.59it/s] 93%|#########3| 8324/8910 [00:07<00:00, 1089.92it/s] 95%|#########4| 8435/8910 [00:07<00:00, 1094.53it/s] 96%|#########5| 8546/8910 [00:07<00:00, 1098.15it/s] 97%|#########7| 8657/8910 [00:07<00:00, 1099.86it/s] 98%|#########8| 8768/8910 [00:07<00:00, 1102.03it/s]100%|#########9| 8879/8910 [00:08<00:00, 1103.83it/s]100%|##########| 8910/8910 [00:08<00:00, 1099.38it/s]
-
-============= Training Dataset =============
-SequenceDataset (
-	path=/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite_datasets/table_wiping/1772931257_163442/demo.hdf5
-	obs_keys=('agentview_image', 'force', 'robot0_eef_pos', 'robot0_eef_quat')
-	seq_length=11
-	filter_key=none
-	frame_stack=1
-	pad_seq_length=True
-	pad_frame_stack=True
-	goal_mode=none
-	cache_mode=all
-	num_demos=20
-	num_sequences=8910
-)
-
-
-============= Model Summary =============
-ObservationKeyToModalityDict: action not found, adding action to mapping with assumed low_dim modality!
-BC_CaMI (
-  ModuleDict(
-    (policy): ActorNetwork(
-        action_dim=6
-  
-        encoder=ObservationGroupEncoder(
-            group=obs
-            ObservationEncoder(
-                Key(
-                    name=agentview_image
-                    shape=[3, 224, 224]
-                    modality=rgb
-                    randomizer=ModuleList(
-                      (0): None
-                    )
-                    net=VisualCore(
-                      input_shape=[3, 224, 224]
-                      output_shape=[64]
-                      backbone_net=ResNet18Conv(input_channel=3, input_coord_conv=False)
-                      pool_net=SpatialSoftmax(num_kp=32, temperature=1.0, noise=0.0)
-                    )
-                    sharing_from=None
-                )
-                Key(
-                    name=force
-                    shape=[6]
-                    modality=low_dim
-                    randomizer=ModuleList(
-                      (0): None
-                    )
-                    net=None
-                    sharing_from=None
-                )
-                Key(
-                    name=robot0_eef_pos
-                    shape=[3]
-                    modality=low_dim
-                    randomizer=ModuleList(
-                      (0): None
-                    )
-                    net=None
-                    sharing_from=None
-                )
-                Key(
-                    name=robot0_eef_quat
-                    shape=[4]
-                    modality=low_dim
-                    randomizer=ModuleList(
-                      (0): None
-                    )
-                    net=None
-                    sharing_from=None
-                )
-                output_shape=[77]
-            )
-        )
-  
-        mlp=MLP(
-            input_dim=77
-            output_dim=1024
-            layer_dims=[1024]
-            layer_func=Linear
-            dropout=None
-            act=ReLU
-            output_act=ReLU
-        )
-  
-        decoder=ObservationDecoder(
-            Key(
-                name=action
-                shape=(6,)
-                modality=low_dim
-                net=(Linear(in_features=1024, out_features=6, bias=True))
-            )
-        )
-    )
-    (query_proj): Sequential(
-      (0): Linear(in_features=1024, out_features=128, bias=True)
-      (1): ReLU()
-      (2): Linear(in_features=128, out_features=128, bias=True)
-    )
-    (snippet_encoder): LSTM(13, 256, batch_first=True)
-    (key_proj): Sequential(
-      (0): Linear(in_features=256, out_features=128, bias=True)
-      (1): ReLU()
-      (2): Linear(in_features=128, out_features=128, bias=True)
-    )
-    (snippet_encoder_target): LSTM(13, 256, batch_first=True)
-    (key_proj_target): Sequential(
-      (0): Linear(in_features=256, out_features=128, bias=True)
-      (1): ReLU()
-      (2): Linear(in_features=128, out_features=128, bias=True)
-    )
-  )
-)
-
-**************************************************
-Warnings generated by robomimic have been duplicated here (from above) for convenience. Please check them carefully.
-ROBOMIMIC WARNING(
-    No environment version found in dataset!
-    Cannot verify if dataset and installed environment versions match
-)
-**************************************************
-
-  0%|          | 0/100 [00:00<?, ?it/s]mean force diff across snippet: 2.2012343406677246
-[BC_CaMI DEBUG] anchor_feat shape: (100, 1024)
-[BC_CaMI DEBUG] query_embedding shape: (100, 128)
-[BC_CaMI DEBUG] actions shape: (100, 6)
-[BC_CaMI DEBUG] target actions shape: (100, 6)
-[BC_CaMI DEBUG] pos_future force shape: (100, 10, 6)
-[BC_CaMI DEBUG] pos_future eef_pos shape: (100, 10, 3)
-[BC_CaMI DEBUG] pos_future eef_quat shape: (100, 10, 4)
-[BC_CaMI DEBUG] pos_snippet_feat shape: (100, 256)
-[BC_CaMI DEBUG] pos_key_embedding shape: (100, 128)
-  1%|1         | 1/100 [00:06<10:17,  6.24s/it]mean force diff across snippet: 2.1307497024536133
-  2%|2         | 2/100 [00:06<04:22,  2.68s/it]mean force diff across snippet: 1.9571654796600342
-  3%|3         | 3/100 [00:06<02:29,  1.54s/it]mean force diff across snippet: 2.006528615951538
-  4%|4         | 4/100 [00:06<01:36,  1.00s/it]mean force diff across snippet: 2.1545886993408203
-  5%|5         | 5/100 [00:06<01:07,  1.41it/s]mean force diff across snippet: 1.9901715517044067
-  6%|6         | 6/100 [00:07<00:50,  1.88it/s]mean force diff across snippet: 1.979905366897583
-  7%|7         | 7/100 [00:07<00:39,  2.38it/s]mean force diff across snippet: 1.916656732559204
-  8%|8         | 8/100 [00:07<00:31,  2.90it/s]mean force diff across snippet: 1.9029204845428467
-  9%|9         | 9/100 [00:07<00:26,  3.41it/s]mean force diff across snippet: 2.1000168323516846
- 10%|#         | 10/100 [00:07<00:23,  3.84it/s]mean force diff across snippet: 1.9481295347213745
- 11%|#1        | 11/100 [00:08<00:21,  4.21it/s]mean force diff across snippet: 1.8729993104934692
- 12%|#2        | 12/100 [00:08<00:19,  4.50it/s]mean force diff across snippet: 1.8824896812438965
- 13%|#3        | 13/100 [00:08<00:18,  4.75it/s]mean force diff across snippet: 1.8674944639205933
- 14%|#4        | 14/100 [00:08<00:17,  4.91it/s]mean force diff across snippet: 1.845942735671997
- 15%|#5        | 15/100 [00:08<00:16,  5.03it/s]mean force diff across snippet: 2.2364301681518555
- 16%|#6        | 16/100 [00:09<00:16,  5.13it/s]mean force diff across snippet: 1.8622267246246338
- 17%|#7        | 17/100 [00:09<00:15,  5.21it/s]mean force diff across snippet: 2.096242904663086
- 18%|#8        | 18/100 [00:09<00:15,  5.26it/s]mean force diff across snippet: 2.190760612487793
- 19%|#9        | 19/100 [00:09<00:15,  5.27it/s]mean force diff across snippet: 1.8922139406204224
- 20%|##        | 20/100 [00:09<00:15,  5.31it/s]mean force diff across snippet: 1.958099365234375
- 21%|##1       | 21/100 [00:09<00:14,  5.33it/s]mean force diff across snippet: 1.996070146560669
- 22%|##2       | 22/100 [00:10<00:14,  5.36it/s]mean force diff across snippet: 1.914987564086914
- 23%|##3       | 23/100 [00:10<00:14,  5.37it/s]mean force diff across snippet: 2.0148518085479736
- 24%|##4       | 24/100 [00:10<00:14,  5.36it/s]mean force diff across snippet: 1.8865658044815063
- 25%|##5       | 25/100 [00:10<00:14,  5.36it/s]mean force diff across snippet: 1.86168372631073
- 26%|##6       | 26/100 [00:10<00:13,  5.35it/s]mean force diff across snippet: 1.8077392578125
- 27%|##7       | 27/100 [00:11<00:13,  5.33it/s]mean force diff across snippet: 1.8482455015182495
- 28%|##8       | 28/100 [00:11<00:13,  5.35it/s]mean force diff across snippet: 1.9907981157302856
- 29%|##9       | 29/100 [00:11<00:13,  5.35it/s]mean force diff across snippet: 1.8587902784347534
- 30%|###       | 30/100 [00:11<00:13,  5.38it/s]mean force diff across snippet: 2.1693012714385986
- 31%|###1      | 31/100 [00:11<00:12,  5.37it/s]mean force diff across snippet: 1.9037595987319946
- 32%|###2      | 32/100 [00:12<00:12,  5.37it/s]mean force diff across snippet: 1.649067997932434
- 33%|###3      | 33/100 [00:12<00:12,  5.36it/s]mean force diff across snippet: 1.8383028507232666
- 34%|###4      | 34/100 [00:12<00:12,  5.35it/s]mean force diff across snippet: 2.075863838195801
- 35%|###5      | 35/100 [00:12<00:12,  5.33it/s]mean force diff across snippet: 2.297670364379883
- 36%|###6      | 36/100 [00:12<00:11,  5.34it/s]mean force diff across snippet: 2.060123920440674
- 37%|###7      | 37/100 [00:12<00:11,  5.33it/s]mean force diff across snippet: 1.9087553024291992
- 38%|###8      | 38/100 [00:13<00:11,  5.37it/s]mean force diff across snippet: 1.8551967144012451
- 39%|###9      | 39/100 [00:13<00:11,  5.37it/s]mean force diff across snippet: 1.769114375114441
- 40%|####      | 40/100 [00:13<00:11,  5.35it/s]mean force diff across snippet: 2.001791477203369
- 41%|####1     | 41/100 [00:13<00:11,  5.35it/s]mean force diff across snippet: 1.8670389652252197
- 42%|####2     | 42/100 [00:13<00:10,  5.38it/s]mean force diff across snippet: 2.1038849353790283
- 43%|####3     | 43/100 [00:14<00:10,  5.37it/s]mean force diff across snippet: 1.909360408782959
- 44%|####4     | 44/100 [00:14<00:10,  5.34it/s]mean force diff across snippet: 1.8475689888000488
- 45%|####5     | 45/100 [00:14<00:10,  5.33it/s] 45%|####5     | 45/100 [00:14<00:17,  3.11it/s]
-Traceback (most recent call last):
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 567, in <module>
-    main(args)
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 511, in main
-    train(config, device=device, resume=args.resume)
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 298, in train
-    step_log = TrainUtils.run_epoch(
-  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/utils/train_utils.py", line 680, in run_epoch
-    batch = next(data_loader_iter)
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 741, in __next__
-    data = self._next_data()
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 801, in _next_data
-    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 57, in fetch
-    return self.collate_fn(data)
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 401, in default_collate
-    return collate(batch, collate_fn_map=default_collate_fn_map)
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 171, in collate
-    {
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 172, in <dictcomp>
-    key: collate(
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 171, in collate
-    {
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 172, in <dictcomp>
-    key: collate(
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 155, in collate
-    return collate_fn_map[elem_type](batch, collate_fn_map=collate_fn_map)
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 288, in collate_numpy_array_fn
-    return collate([torch.as_tensor(b) for b in batch], collate_fn_map=collate_fn_map)
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 155, in collate
-    return collate_fn_map[elem_type](batch, collate_fn_map=collate_fn_map)
-  File "/home/hisham246/anaconda3/envs/robosuite/lib/python3.10/site-packages/torch/utils/data/_utils/collate.py", line 275, in collate_tensor_fn
-    return torch.stack(batch, 0, out=out)
-KeyboardInterrupt

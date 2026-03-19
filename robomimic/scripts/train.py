@@ -25,6 +25,7 @@ import psutil
 import sys
 import socket
 import traceback
+from datetime import datetime
 
 from collections import OrderedDict
 
@@ -223,6 +224,14 @@ def train(config, device, resume=False):
                     config.algo["value_planner"][sub_algo].optim_params[k]["num_train_batches"] = len(trainset) if train_num_steps is None else train_num_steps
                     config.algo["value_planner"][sub_algo].optim_params[k]["num_epochs"] = config.train.num_epochs
 
+
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dataset_tag = os.path.splitext(os.path.basename(config.train.data[0]["path"]))[0]
+
+    with config.values_unlocked():
+        config.experiment.name = f"{config.algo_name}_{dataset_tag}_{timestamp}"
+        
     # setup for a new training run
     data_logger = DataLogger(
         log_dir,

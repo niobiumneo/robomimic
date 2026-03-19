@@ -5,9 +5,9 @@
         "validate": false,
         "logging": {
             "terminal_output_to_txt": true,
-            "log_tb": true,
-            "log_wandb": false,
-            "wandb_proj_name": "debug"
+            "log_tb": false,
+            "log_wandb": true,
+            "wandb_proj_name": "cami"
         },
         "save": {
             "enabled": true,
@@ -48,7 +48,7 @@
         "hdf5_normalize_obs": false,
         "hdf5_filter_key": null,
         "hdf5_validation_filter_key": null,
-        "seq_length": 11,
+        "seq_length": 1,
         "pad_seq_length": true,
         "frame_stack": 1,
         "pad_frame_stack": true,
@@ -75,6 +75,42 @@
     "algo": {
         "optim_params": {
             "policy": {
+                "optimizer_type": "adam",
+                "learning_rate": {
+                    "initial": 0.0001,
+                    "decay_factor": 0.1,
+                    "epoch_schedule": [],
+                    "scheduler_type": "multistep"
+                },
+                "regularization": {
+                    "L2": 0.0
+                }
+            },
+            "query_proj": {
+                "optimizer_type": "adam",
+                "learning_rate": {
+                    "initial": 0.0001,
+                    "decay_factor": 0.1,
+                    "epoch_schedule": [],
+                    "scheduler_type": "multistep"
+                },
+                "regularization": {
+                    "L2": 0.0
+                }
+            },
+            "snippet_encoder": {
+                "optimizer_type": "adam",
+                "learning_rate": {
+                    "initial": 0.0001,
+                    "decay_factor": 0.1,
+                    "epoch_schedule": [],
+                    "scheduler_type": "multistep"
+                },
+                "regularization": {
+                    "L2": 0.0
+                }
+            },
+            "key_proj": {
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
@@ -174,13 +210,13 @@
         },
         "cami": {
             "enabled": true,
-            "loss_weight": 0.1,
+            "loss_weight": 0.01,
             "temperature": 0.07,
             "loss_type": "paired_infonce",
             "snippet_horizon": 10,
             "num_negatives": 1,
             "opposite_contact_negatives_only": true,
-            "use_momentum_target": true,
+            "use_momentum_target": false,
             "target_tau": 0.005,
             "image_feature_dim": 128,
             "force_feature_dim": 128,
@@ -196,7 +232,7 @@
             "key_proj_layers": [
                 128
             ],
-            "snippet_encoder_type": "gru",
+            "snippet_encoder_type": "lstm",
             "snippet_hidden_dim": 256,
             "snippet_num_layers": 1,
             "image_obs_key": "agentview_image",

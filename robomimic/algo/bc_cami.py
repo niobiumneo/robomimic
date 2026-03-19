@@ -6,6 +6,8 @@ import copy
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import robomimic.utils.loss_utils as LossUtils
 
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
@@ -229,8 +231,6 @@ class BC_CaMI(BC):
             predictions["pos_snippet_feat"] = pos_snippet_feat
             predictions["pos_key_embedding"] = pos_key_embedding
 
-        predictions["cami_loss"] = torch.tensor(0.0, device=self.device)
-
         if not hasattr(self, "_printed_cami_debug"):
             print("[BC_CaMI DEBUG] anchor_feat shape:", tuple(anchor_feat.shape))
             print("[BC_CaMI DEBUG] query_embedding shape:", tuple(query_embedding.shape))
@@ -250,13 +250,64 @@ class BC_CaMI(BC):
 
         return predictions
     
+    def _compute_cami_inbatch_loss(self, query_embedding, key_embedding):
+        """
+        In-batch InfoNCE:
+        - positive for sample i is key_embedding[i]
+        - negatives are key_embedding[j] for j != i in the same batch
+
+        Args:
+            query_embedding: (B, D)
+            key_embedding:   (B, D)
+
+        Returns:
+            cami_loss: scalar tensor
+            cami_info: dict of debug stats
+        """
+        temperature = self.algo_config.cami.temperature
+
+        # extra safety, even if already normalized upstream
+        if getattr(self.algo_config.cami, "normalize_embeddings", False):
+            query_embedding = F.normalize(query_embedding, dim=-1)
+            key_embedding = F.normalize(key_embedding, dim=-1)
+
+        # (B, B)
+        logits = torch.matmul(query_embedding, key_embedding.T) / temperature
+
+        # diagonal entries are positives
+        labels = torch.arange(logits.shape[0], device=logits.device)
+
+        cami_loss = F.cross_entropy(logits, labels)
+
+        with torch.no_grad():
+            pos_logits = logits.diag()
+
+            B = logits.shape[0]
+            if B > 1:
+                neg_mask = ~torch.eye(B, dtype=torch.bool, device=logits.device)
+                neg_logits = logits[neg_mask]
+                neg_logit_mean = neg_logits.mean()
+            else:
+                neg_logit_mean = torch.zeros((), device=logits.device)
+
+            inbatch_acc = (logits.argmax(dim=1) == labels).float().mean()
+
+            q_norm = query_embedding.norm(dim=-1).mean()
+            k_norm = key_embedding.norm(dim=-1).mean()
+
+        cami_info = {
+            "cami_pos_logit_mean": pos_logits.mean(),
+            "cami_neg_logit_mean": neg_logit_mean,
+            "cami_inbatch_acc": inbatch_acc,
+            "query_norm_mean": q_norm,
+            "key_norm_mean": k_norm,
+        }
+
+        return cami_loss, cami_info
+    
     def _compute_losses(self, predictions, batch):
         """
-        Compute BC loss + CaMI loss.
-
-        Version 1:
-            - action_loss is exactly BC
-            - cami_loss is placeholder zero
+        Compute BC loss + MVP CaMI in-batch InfoNCE loss.
         """
         losses = OrderedDict()
 
@@ -266,9 +317,6 @@ class BC_CaMI(BC):
         losses["l2_loss"] = nn.MSELoss()(actions, a_target)
         losses["l1_loss"] = nn.SmoothL1Loss()(actions, a_target)
 
-        # cosine direction loss on eef delta position
-        # keeps BC behavior aligned with original BC implementation
-        import robomimic.utils.loss_utils as LossUtils
         losses["cos_loss"] = LossUtils.cosine_loss(actions[..., :3], a_target[..., :3])
 
         action_losses = [
@@ -277,36 +325,75 @@ class BC_CaMI(BC):
             self.algo_config.loss.cos_weight * losses["cos_loss"],
         ]
         bc_action_loss = sum(action_losses)
+        losses["bc_action_loss"] = bc_action_loss
 
-        cami_loss = predictions["cami_loss"]
-        losses["cami_loss"] = cami_loss
+        # CaMI in-batch InfoNCE
+        if getattr(self.algo_config.cami, "enabled", False) and "pos_key_embedding" in predictions:
+            query_embedding = predictions["query_embedding"]
+            key_embedding = predictions["pos_key_embedding"]
 
-        if getattr(self.algo_config.cami, "enabled", False):
-            losses["action_loss"] = bc_action_loss + self.algo_config.cami.loss_weight * cami_loss
+            cami_loss, cami_info = self._compute_cami_inbatch_loss(
+                query_embedding=query_embedding,
+                key_embedding=key_embedding,
+            )
+            losses["cami_loss"] = cami_loss
+
+            for k, v in cami_info.items():
+                losses[k] = v
+
+            losses["cami_logit_gap"] = losses["cami_pos_logit_mean"] - losses["cami_neg_logit_mean"]
+
+            losses["action_loss"] = (
+                bc_action_loss
+                + self.algo_config.cami.loss_weight * cami_loss
+            )
         else:
+            losses["cami_loss"] = torch.zeros((), device=actions.device, dtype=actions.dtype)
+            losses["cami_logit_gap"] = torch.zeros((), device=actions.device, dtype=actions.dtype)
             losses["action_loss"] = bc_action_loss
 
         return losses
 
     def _train_step(self, losses):
         """
-        Backpropagation step.
-
-        Version 1:
-            - single optimizer on policy net, like BC
-            - later we can split or expand when explicit CaMI modules become trainable
+        Joint optimization step for BC policy + CaMI MVP modules.
         """
         info = OrderedDict()
 
-        policy_grad_norms = TorchUtils.backprop_for_loss(
-            net=self.nets["policy"],
-            optim=self.optimizers["policy"],
-            loss=losses["action_loss"],
-            max_grad_norm=self.global_config.train.max_grad_norm,
-        )
-        info["policy_grad_norms"] = policy_grad_norms
-        return info
+        if not hasattr(self, "_printed_optimizer_debug"):
+            print("self.nets keys:", list(self.nets.keys()))
+            print("self.optimizers keys:", list(self.optimizers.keys()))
+            self._printed_optimizer_debug = True
 
+        trainable_names = ["policy", "query_proj", "snippet_encoder", "key_proj"]
+
+        for name in trainable_names:
+            self.optimizers[name].zero_grad()
+
+        losses["action_loss"].backward()
+
+        max_grad_norm = self.global_config.train.max_grad_norm
+
+        for name in trainable_names:
+            if max_grad_norm is not None:
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.nets[name].parameters(),
+                    max_grad_norm,
+                )
+                info[f"{name}_grad_norm"] = float(grad_norm)
+            else:
+                total_norm_sq = 0.0
+                for p in self.nets[name].parameters():
+                    if p.grad is not None:
+                        param_norm = p.grad.data.norm(2).item()
+                        total_norm_sq += param_norm ** 2
+                info[f"{name}_grad_norm"] = total_norm_sq ** 0.5
+
+        for name in trainable_names:
+            self.optimizers[name].step()
+
+        return info
+    
     @torch.no_grad()
     def _update_target_networks(self):
         """
@@ -338,13 +425,44 @@ class BC_CaMI(BC):
             target_param.data.add_(tau * online_param.data)
 
     def log_info(self, info):
-        """
-        Process info dictionary for logging.
-        """
         log = super(BC_CaMI, self).log_info(info)
+        losses = info["losses"]
 
-        if "cami_loss" in info["losses"]:
-            log["CaMI_Loss"] = info["losses"]["cami_loss"].item()
+        if "action_loss" in losses:
+            log["Loss"] = losses["action_loss"].item()
+        if "bc_action_loss" in losses:
+            log["BC/Action_Loss"] = losses["bc_action_loss"].item()
+        if "cami_loss" in losses:
+            log["CaMI/Loss"] = losses["cami_loss"].item()
+
+        if "l2_loss" in losses:
+            log["BC/L2_Loss"] = losses["l2_loss"].item()
+        if "l1_loss" in losses:
+            log["BC/L1_Loss"] = losses["l1_loss"].item()
+        if "cos_loss" in losses:
+            log["BC/Cosine_Loss"] = losses["cos_loss"].item()
+
+        if "cami_pos_logit_mean" in losses:
+            log["CaMI/Pos_Logit_Mean"] = losses["cami_pos_logit_mean"].item()
+        if "cami_neg_logit_mean" in losses:
+            log["CaMI/Neg_Logit_Mean"] = losses["cami_neg_logit_mean"].item()
+        if "cami_inbatch_acc" in losses:
+            log["CaMI/InBatch_Acc"] = losses["cami_inbatch_acc"].item()
+        if "query_norm_mean" in losses:
+            log["CaMI/Query_Norm_Mean"] = losses["query_norm_mean"].item()
+        if "key_norm_mean" in losses:
+            log["CaMI/Key_Norm_Mean"] = losses["key_norm_mean"].item()
+        if "cami_logit_gap" in losses:
+            log["CaMI/Logit_Gap"] = losses["cami_logit_gap"].item()
+
+        if "policy_grad_norm" in info:
+            log["GradNorm/Policy"] = info["policy_grad_norm"]
+        if "query_proj_grad_norm" in info:
+            log["GradNorm/Query_Proj"] = info["query_proj_grad_norm"]
+        if "snippet_encoder_grad_norm" in info:
+            log["GradNorm/Snippet_Encoder"] = info["snippet_encoder_grad_norm"]
+        if "key_proj_grad_norm" in info:
+            log["GradNorm/Key_Proj"] = info["key_proj_grad_norm"]
 
         return log
 

@@ -1,13 +1,13 @@
 {
     "algo_name": "bc",
     "experiment": {
-        "name": "test",
+        "name": "Test_BC",
         "validate": false,
         "logging": {
             "terminal_output_to_txt": true,
-            "log_tb": true,
-            "log_wandb": false,
-            "wandb_proj_name": "debug"
+            "log_tb": false,
+            "log_wandb": true,
+            "wandb_proj_name": "bc"
         },
         "save": {
             "enabled": true,
@@ -180,9 +180,11 @@
                     "robot0_eef_pos",
                     "robot0_eef_quat",
                     "robot0_gripper_qpos",
-                    "object"
+                    "object",
+                    "force"
                 ],
-                "rgb": [],
+                "rgb": ["agentview_image",
+                    "robot0_eye_in_hand_image"],
                 "depth": [],
                 "scan": []
             },

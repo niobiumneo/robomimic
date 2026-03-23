@@ -1,0 +1,1462 @@
+
+============= Initialized Observation Utils with Obs Spec =============
+
+using obs modality: low_dim with keys: ['object', 'robot0_eef_quat', 'robot0_eef_pos', 'robot0_gripper_qpos']
+using obs modality: rgb with keys: []
+using obs modality: depth with keys: []
+using obs modality: scan with keys: []
+
+============= Loaded Environment Metadata =============
+obs key object with shape (14,)
+obs key robot0_eef_pos with shape (3,)
+obs key robot0_eef_quat with shape (4,)
+obs key robot0_gripper_qpos with shape (2,)
+[robosuite WARNING] No private macro file found! (macros.py:58)
+[robosuite WARNING] It is recommended to use a private macro file (macros.py:59)
+[robosuite WARNING] To setup, run: python /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite/robosuite/scripts/setup_macros.py (macros.py:60)
+Created environment with name NutAssemblySquare
+Action size is 7
+NutAssemblySquare
+{
+    "camera_depths": false,
+    "camera_heights": 224,
+    "camera_names": [
+        "agentview",
+        "robot0_eye_in_hand"
+    ],
+    "camera_widths": 224,
+    "control_freq": 20,
+    "controller_configs": {
+        "body_parts": {
+            "right": {
+                "control_delta": true,
+                "damping": 1,
+                "damping_limits": [
+                    0,
+                    10
+                ],
+                "gripper": {
+                    "type": "GRIP"
+                },
+                "impedance_mode": "fixed",
+                "input_max": 1,
+                "input_min": -1,
+                "input_ref_frame": "world",
+                "interpolation": null,
+                "kp": 150,
+                "kp_limits": [
+                    0,
+                    300
+                ],
+                "orientation_limits": null,
+                "output_max": [
+                    0.05,
+                    0.05,
+                    0.05,
+                    0.5,
+                    0.5,
+                    0.5
+                ],
+                "output_min": [
+                    -0.05,
+                    -0.05,
+                    -0.05,
+                    -0.5,
+                    -0.5,
+                    -0.5
+                ],
+                "position_limits": null,
+                "ramp_ratio": 0.2,
+                "type": "OSC_POSE",
+                "uncouple_pos_ori": true
+            }
+        },
+        "type": "BASIC"
+    },
+    "has_offscreen_renderer": true,
+    "has_renderer": false,
+    "ignore_done": true,
+    "lite_physics": false,
+    "render_gpu_device_id": 0,
+    "reward_shaping": false,
+    "robots": [
+        "Panda"
+    ],
+    "use_camera_obs": false,
+    "use_object_obs": true
+}
+
+SequenceDataset: loading dataset into memory...
+  0%|          | 0/200 [00:00<?, ?it/s] 48%|####7     | 95/200 [00:00<00:00, 944.72it/s] 95%|#########5| 190/200 [00:00<00:00, 922.15it/s]100%|##########| 200/200 [00:00<00:00, 920.82it/s]
+SequenceDataset: caching get_item calls...
+  0%|          | 0/30154 [00:00<?, ?it/s]SequenceDataset: computing action statistics...
+
+  0%|          | 0/199 [00:00<?, ?it/s][A100%|##########| 199/199 [00:00<00:00, 5223.19it/s]
+  5%|5         | 1550/30154 [00:00<00:01, 15495.40it/s] 14%|#3        | 4132/30154 [00:00<00:01, 21564.33it/s] 22%|##2       | 6709/30154 [00:00<00:00, 23482.09it/s] 31%|###       | 9278/30154 [00:00<00:00, 24350.43it/s] 39%|###9      | 11846/30154 [00:00<00:00, 24828.18it/s] 48%|####7     | 14434/30154 [00:00<00:00, 25182.89it/s] 56%|#####6    | 17018/30154 [00:00<00:00, 25397.17it/s] 65%|######4   | 19600/30154 [00:00<00:00, 25529.89it/s] 74%|#######3  | 22190/30154 [00:00<00:00, 25644.00it/s] 82%|########2 | 24767/30154 [00:01<00:00, 25682.05it/s] 91%|######### | 27350/30154 [00:01<00:00, 25726.82it/s] 99%|#########9| 29929/30154 [00:01<00:00, 25743.25it/s]100%|##########| 30154/30154 [00:01<00:00, 24936.86it/s]
+
+============= Training Dataset =============
+SequenceDataset (
+	path=/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic_datasets/square/ph/image_224_square_force_v15.hdf5
+	obs_keys=('object', 'robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos')
+	seq_length=1
+	filter_key=none
+	frame_stack=1
+	pad_seq_length=True
+	pad_frame_stack=True
+	goal_mode=none
+	cache_mode=all
+	num_demos=200
+	num_sequences=30154
+)
+
+
+============= Model Summary =============
+ObservationKeyToModalityDict: action not found, adding action to mapping with assumed low_dim modality!
+BC (
+  ModuleDict(
+    (policy): ActorNetwork(
+        action_dim=7
+  
+        encoder=ObservationGroupEncoder(
+            group=obs
+            ObservationEncoder(
+                Key(
+                    name=object
+                    shape=[14]
+                    modality=low_dim
+                    randomizer=ModuleList(
+                      (0): None
+                    )
+                    net=None
+                    sharing_from=None
+                )
+                Key(
+                    name=robot0_eef_pos
+                    shape=[3]
+                    modality=low_dim
+                    randomizer=ModuleList(
+                      (0): None
+                    )
+                    net=None
+                    sharing_from=None
+                )
+                Key(
+                    name=robot0_eef_quat
+                    shape=[4]
+                    modality=low_dim
+                    randomizer=ModuleList(
+                      (0): None
+                    )
+                    net=None
+                    sharing_from=None
+                )
+                Key(
+                    name=robot0_gripper_qpos
+                    shape=[2]
+                    modality=low_dim
+                    randomizer=ModuleList(
+                      (0): None
+                    )
+                    net=None
+                    sharing_from=None
+                )
+                output_shape=[23]
+            )
+        )
+  
+        mlp=MLP(
+            input_dim=23
+            output_dim=1024
+            layer_dims=[1024]
+            layer_func=Linear
+            dropout=None
+            act=ReLU
+            output_act=ReLU
+        )
+  
+        decoder=ObservationDecoder(
+            Key(
+                name=action
+                shape=(7,)
+                modality=low_dim
+                net=(Linear(in_features=1024, out_features=7, bias=True))
+            )
+        )
+    )
+  )
+)
+
+**************************************************
+Warnings generated by robomimic have been duplicated here (from above) for convenience. Please check them carefully.
+**************************************************
+
+  0%|          | 0/100 [00:00<?, ?it/s]  1%|1         | 1/100 [00:00<00:41,  2.40it/s] 25%|##5       | 25/100 [00:00<00:01, 62.85it/s] 49%|####9     | 49/100 [00:00<00:00, 109.17it/s] 73%|#######3  | 73/100 [00:00<00:00, 143.63it/s] 97%|#########7| 97/100 [00:00<00:00, 169.96it/s]100%|##########| 100/100 [00:00<00:00, 119.29it/s]
+Train Epoch 1
+{
+    "Cosine_Loss": 0.6429063177108765,
+    "L1_Loss": 0.08199857853353024,
+    "L2_Loss": 0.16627114854753017,
+    "Loss": 0.16627114854753017,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.027173524909067055,
+    "Time_Data_Loading": 0.0025416890780131022,
+    "Time_Epoch": 0.01398395299911499,
+    "Time_Log_Info": 0.0002460916837056478,
+    "Time_Process_Batch": 0.0004947702089945475,
+    "Time_Train_Batch": 0.010669155915578207
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 1 Memory Usage: 2877 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 217.80it/s] 46%|####6     | 46/100 [00:00<00:00, 225.20it/s] 70%|#######   | 70/100 [00:00<00:00, 228.25it/s] 93%|#########3| 93/100 [00:00<00:00, 228.03it/s]100%|##########| 100/100 [00:00<00:00, 227.48it/s]
+Train Epoch 2
+{
+    "Cosine_Loss": 0.5847455260157585,
+    "L1_Loss": 0.06578362625092268,
+    "L2_Loss": 0.13662533797323703,
+    "Loss": 0.13662533797323703,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.03245109871881141,
+    "Time_Data_Loading": 0.002658240000406901,
+    "Time_Epoch": 0.007345326741536458,
+    "Time_Log_Info": 0.000226442019144694,
+    "Time_Process_Batch": 0.00029697815577189125,
+    "Time_Train_Batch": 0.0041263779004414875
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 2 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 24%|##4       | 24/100 [00:00<00:00, 234.36it/s] 48%|####8     | 48/100 [00:00<00:00, 227.64it/s] 72%|#######2  | 72/100 [00:00<00:00, 232.91it/s] 96%|#########6| 96/100 [00:00<00:00, 230.89it/s]100%|##########| 100/100 [00:00<00:00, 230.57it/s]
+Train Epoch 3
+{
+    "Cosine_Loss": 0.5451130771636963,
+    "L1_Loss": 0.0573492294177413,
+    "L2_Loss": 0.11845077469944953,
+    "Loss": 0.11845077469944953,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.03538483628142785,
+    "Time_Data_Loading": 0.002636388937632243,
+    "Time_Epoch": 0.00724192460378011,
+    "Time_Log_Info": 0.00023587544759114584,
+    "Time_Process_Batch": 0.00027237335840861004,
+    "Time_Train_Batch": 0.004065461953481038
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 3 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 216.94it/s] 45%|####5     | 45/100 [00:00<00:00, 223.59it/s] 69%|######9   | 69/100 [00:00<00:00, 229.86it/s] 92%|#########2| 92/100 [00:00<00:00, 225.48it/s]100%|##########| 100/100 [00:00<00:00, 226.74it/s]
+Train Epoch 4
+{
+    "Cosine_Loss": 0.49844599664211275,
+    "L1_Loss": 0.04987765904515982,
+    "L2_Loss": 0.10243345819413661,
+    "Loss": 0.10243345819413661,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.037509620498985895,
+    "Time_Data_Loading": 0.0026490052541097006,
+    "Time_Epoch": 0.007364348570505778,
+    "Time_Log_Info": 0.0002455552419026693,
+    "Time_Process_Batch": 0.0002637267112731934,
+    "Time_Train_Batch": 0.0041678468386332195
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 4 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 21%|##1       | 21/100 [00:00<00:00, 206.98it/s] 43%|####3     | 43/100 [00:00<00:00, 209.37it/s] 64%|######4   | 64/100 [00:00<00:00, 208.08it/s] 85%|########5 | 85/100 [00:00<00:00, 198.66it/s]100%|##########| 100/100 [00:00<00:00, 204.74it/s]
+Train Epoch 5
+{
+    "Cosine_Loss": 0.45194008976221084,
+    "L1_Loss": 0.04353952903300524,
+    "L2_Loss": 0.08910585474222898,
+    "Loss": 0.08910585474222898,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.04806542392521806,
+    "Time_Data_Loading": 0.0028206785519917805,
+    "Time_Epoch": 0.008156049251556396,
+    "Time_Log_Info": 0.0001710653305053711,
+    "Time_Process_Batch": 0.00035643577575683594,
+    "Time_Train_Batch": 0.004770469665527344
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 5 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 222.94it/s] 47%|####6     | 47/100 [00:00<00:00, 231.31it/s] 71%|#######1  | 71/100 [00:00<00:00, 231.35it/s] 95%|#########5| 95/100 [00:00<00:00, 232.06it/s]100%|##########| 100/100 [00:00<00:00, 231.59it/s]
+Train Epoch 6
+{
+    "Cosine_Loss": 0.42114963054656984,
+    "L1_Loss": 0.038545809257775544,
+    "L2_Loss": 0.07864553812891245,
+    "Loss": 0.07864553812891245,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.05999895714721788,
+    "Time_Data_Loading": 0.0025652130444844563,
+    "Time_Epoch": 0.00720831553141276,
+    "Time_Log_Info": 0.00023572444915771485,
+    "Time_Process_Batch": 0.0002649227778116862,
+    "Time_Train_Batch": 0.00411006212234497
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 6 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 227.23it/s] 52%|#####2    | 52/100 [00:00<00:00, 260.95it/s] 81%|########1 | 81/100 [00:00<00:00, 271.29it/s]100%|##########| 100/100 [00:00<00:00, 269.16it/s]
+Train Epoch 7
+{
+    "Cosine_Loss": 0.38885670512914655,
+    "L1_Loss": 0.035110082048922776,
+    "L2_Loss": 0.071708320453763,
+    "Loss": 0.071708320453763,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.06882759663905745,
+    "Time_Data_Loading": 0.0024216055870056154,
+    "Time_Epoch": 0.006207946936289469,
+    "Time_Log_Info": 0.0002605676651000977,
+    "Time_Process_Batch": 0.0002785762151082357,
+    "Time_Train_Batch": 0.0032169183095296225
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 7 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 216.61it/s] 45%|####5     | 45/100 [00:00<00:00, 220.82it/s] 69%|######9   | 69/100 [00:00<00:00, 226.42it/s] 93%|#########3| 93/100 [00:00<00:00, 229.70it/s]100%|##########| 100/100 [00:00<00:00, 226.62it/s]
+Train Epoch 8
+{
+    "Cosine_Loss": 0.36915239721536636,
+    "L1_Loss": 0.032809790428727864,
+    "L2_Loss": 0.06690314516425133,
+    "Loss": 0.06690314516425133,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.06391674634302034,
+    "Time_Data_Loading": 0.002669175465901693,
+    "Time_Epoch": 0.007368310292561849,
+    "Time_Log_Info": 0.00022612412770589191,
+    "Time_Process_Batch": 0.0002742449442545573,
+    "Time_Train_Batch": 0.00416558583577474
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 8 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 218.55it/s] 46%|####6     | 46/100 [00:00<00:00, 225.10it/s] 69%|######9   | 69/100 [00:00<00:00, 217.20it/s] 93%|#########3| 93/100 [00:00<00:00, 221.81it/s]100%|##########| 100/100 [00:00<00:00, 221.44it/s]
+Train Epoch 9
+{
+    "Cosine_Loss": 0.34284396067261697,
+    "L1_Loss": 0.030238111317157746,
+    "L2_Loss": 0.06169555265456438,
+    "Loss": 0.06169555265456438,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.059689019394427306,
+    "Time_Data_Loading": 0.0027697046597798666,
+    "Time_Epoch": 0.007540984948476156,
+    "Time_Log_Info": 0.0002158045768737793,
+    "Time_Process_Batch": 0.0002799908320109049,
+    "Time_Train_Batch": 0.004232974847157797
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 9 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 217.30it/s] 45%|####5     | 45/100 [00:00<00:00, 224.70it/s] 68%|######8   | 68/100 [00:00<00:00, 224.60it/s] 91%|#########1| 91/100 [00:00<00:00, 224.61it/s]100%|##########| 100/100 [00:00<00:00, 224.51it/s]
+Train Epoch 10
+{
+    "Cosine_Loss": 0.33387308537960053,
+    "L1_Loss": 0.029149463828653098,
+    "L2_Loss": 0.0595151699334383,
+    "Loss": 0.0595151699334383,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.10542192300468742,
+    "Time_Data_Loading": 0.0026951034863789878,
+    "Time_Epoch": 0.007446372509002685,
+    "Time_Log_Info": 0.00024399360020955403,
+    "Time_Process_Batch": 0.0002657771110534668,
+    "Time_Train_Batch": 0.004191188017527262
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 10 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 220.56it/s] 47%|####6     | 47/100 [00:00<00:00, 229.57it/s] 70%|#######   | 70/100 [00:00<00:00, 224.57it/s] 93%|#########3| 93/100 [00:00<00:00, 222.52it/s]100%|##########| 100/100 [00:00<00:00, 223.77it/s]
+Train Epoch 11
+{
+    "Cosine_Loss": 0.32397267907857896,
+    "L1_Loss": 0.027723941151052714,
+    "L2_Loss": 0.056619721204042434,
+    "Loss": 0.056619721204042434,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.08348441438633017,
+    "Time_Data_Loading": 0.00276410977045695,
+    "Time_Epoch": 0.007461734612782796,
+    "Time_Log_Info": 0.00022023121515909831,
+    "Time_Process_Batch": 0.00028114716211954753,
+    "Time_Train_Batch": 0.004158687591552734
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 11 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 216.61it/s] 46%|####6     | 46/100 [00:00<00:00, 225.73it/s] 70%|#######   | 70/100 [00:00<00:00, 228.52it/s] 93%|#########3| 93/100 [00:00<00:00, 228.03it/s]100%|##########| 100/100 [00:00<00:00, 227.41it/s]
+Train Epoch 12
+{
+    "Cosine_Loss": 0.30709146469831466,
+    "L1_Loss": 0.02579165678471327,
+    "L2_Loss": 0.05260150536894798,
+    "Loss": 0.05260150536894798,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.07054790000667709,
+    "Time_Data_Loading": 0.0025810559590657553,
+    "Time_Epoch": 0.007347373167673746,
+    "Time_Log_Info": 0.0002493143081665039,
+    "Time_Process_Batch": 0.00027661720911661785,
+    "Time_Train_Batch": 0.0042029619216918945
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 12 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 218.88it/s] 45%|####5     | 45/100 [00:00<00:00, 225.37it/s] 69%|######9   | 69/100 [00:00<00:00, 227.61it/s] 92%|#########2| 92/100 [00:00<00:00, 226.78it/s]100%|##########| 100/100 [00:00<00:00, 223.13it/s]
+Train Epoch 13
+{
+    "Cosine_Loss": 0.3013993059098721,
+    "L1_Loss": 0.02526478352025151,
+    "L2_Loss": 0.05152432594448328,
+    "Loss": 0.05152432594448328,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.0766719693592313,
+    "Time_Data_Loading": 0.0027114590009053546,
+    "Time_Epoch": 0.007485222816467285,
+    "Time_Log_Info": 0.00024276177088419597,
+    "Time_Process_Batch": 0.0003114501635233561,
+    "Time_Train_Batch": 0.004182302951812744
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 13 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 223.89it/s] 48%|####8     | 48/100 [00:00<00:00, 236.20it/s] 72%|#######2  | 72/100 [00:00<00:00, 234.12it/s] 96%|#########6| 96/100 [00:00<00:00, 229.12it/s]100%|##########| 100/100 [00:00<00:00, 230.94it/s]
+Train Epoch 14
+{
+    "Cosine_Loss": 0.297501939535141,
+    "L1_Loss": 0.024618036188185213,
+    "L2_Loss": 0.05036449439823627,
+    "Loss": 0.05036449439823627,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.10498881987838103,
+    "Time_Data_Loading": 0.0027162830034891763,
+    "Time_Epoch": 0.007237660884857178,
+    "Time_Log_Info": 0.00023804505666097004,
+    "Time_Process_Batch": 0.0002552390098571777,
+    "Time_Train_Batch": 0.003987069924672445
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 14 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 214.79it/s] 46%|####6     | 46/100 [00:00<00:00, 226.27it/s] 69%|######9   | 69/100 [00:00<00:00, 221.91it/s] 92%|#########2| 92/100 [00:00<00:00, 222.04it/s]100%|##########| 100/100 [00:00<00:00, 221.59it/s]
+Train Epoch 15
+{
+    "Cosine_Loss": 0.2990119335055351,
+    "L1_Loss": 0.024049991704523564,
+    "L2_Loss": 0.04924574591219425,
+    "Loss": 0.04924574591219425,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.11193681646800542,
+    "Time_Data_Loading": 0.002871092160542806,
+    "Time_Epoch": 0.007535485426584879,
+    "Time_Log_Info": 0.00024347305297851564,
+    "Time_Process_Batch": 0.00027074813842773435,
+    "Time_Train_Batch": 0.004114790757497152
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 15 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 20%|##        | 20/100 [00:00<00:00, 199.61it/s] 42%|####2     | 42/100 [00:00<00:00, 209.31it/s] 65%|######5   | 65/100 [00:00<00:00, 218.05it/s] 89%|########9 | 89/100 [00:00<00:00, 223.34it/s]100%|##########| 100/100 [00:00<00:00, 219.45it/s]
+Train Epoch 16
+{
+    "Cosine_Loss": 0.2801553131639957,
+    "L1_Loss": 0.023266589622944592,
+    "L2_Loss": 0.04751410689204931,
+    "Loss": 0.04751410689204931,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.09579455273542407,
+    "Time_Data_Loading": 0.00282135804494222,
+    "Time_Epoch": 0.0076087037722269695,
+    "Time_Log_Info": 0.000221407413482666,
+    "Time_Process_Batch": 0.00026589234670003256,
+    "Time_Train_Batch": 0.004266965389251709
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 16 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 217.16it/s] 44%|####4     | 44/100 [00:00<00:00, 218.80it/s] 67%|######7   | 67/100 [00:00<00:00, 223.62it/s] 90%|######### | 90/100 [00:00<00:00, 223.98it/s]100%|##########| 100/100 [00:00<00:00, 222.03it/s]
+Train Epoch 17
+{
+    "Cosine_Loss": 0.2824153488874435,
+    "L1_Loss": 0.022694640709087253,
+    "L2_Loss": 0.04635898560285568,
+    "Loss": 0.04635898560285568,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.10742011929585715,
+    "Time_Data_Loading": 0.002759059270222982,
+    "Time_Epoch": 0.00752553939819336,
+    "Time_Log_Info": 0.00022945006688435872,
+    "Time_Process_Batch": 0.00029578606287638344,
+    "Time_Train_Batch": 0.004201507568359375
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 17 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 224.74it/s] 46%|####6     | 46/100 [00:00<00:00, 224.30it/s] 70%|#######   | 70/100 [00:00<00:00, 227.87it/s] 93%|#########3| 93/100 [00:00<00:00, 225.85it/s]100%|##########| 100/100 [00:00<00:00, 226.38it/s]
+Train Epoch 18
+{
+    "Cosine_Loss": 0.2811505901813507,
+    "L1_Loss": 0.022360806781798602,
+    "L2_Loss": 0.045690430495887994,
+    "Loss": 0.045690430495887994,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.10265547833005258,
+    "Time_Data_Loading": 0.0028024593989054362,
+    "Time_Epoch": 0.00737537145614624,
+    "Time_Log_Info": 0.00023599465688069662,
+    "Time_Process_Batch": 0.00028582016626993814,
+    "Time_Train_Batch": 0.004018712043762207
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 18 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 222.95it/s] 46%|####6     | 46/100 [00:00<00:00, 219.77it/s] 70%|#######   | 70/100 [00:00<00:00, 228.69it/s] 94%|#########3| 94/100 [00:00<00:00, 232.24it/s]100%|##########| 100/100 [00:00<00:00, 230.32it/s]
+Train Epoch 19
+{
+    "Cosine_Loss": 0.27179532140493395,
+    "L1_Loss": 0.021641770480200648,
+    "L2_Loss": 0.04420147584751248,
+    "Loss": 0.04420147584751248,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.11484233502476854,
+    "Time_Data_Loading": 0.00262148380279541,
+    "Time_Epoch": 0.007252029577891032,
+    "Time_Log_Info": 0.0002358873685201009,
+    "Time_Process_Batch": 0.00026757319768269856,
+    "Time_Train_Batch": 0.0040931185086568195
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 19 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 229.01it/s] 46%|####6     | 46/100 [00:00<00:00, 225.94it/s] 70%|#######   | 70/100 [00:00<00:00, 232.14it/s] 94%|#########3| 94/100 [00:00<00:00, 234.01it/s]100%|##########| 100/100 [00:00<00:00, 232.58it/s]
+Train Epoch 20
+{
+    "Cosine_Loss": 0.2777876016497612,
+    "L1_Loss": 0.02146667241118848,
+    "L2_Loss": 0.043892883080989126,
+    "Loss": 0.043892883080989126,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.09514778993750951,
+    "Time_Data_Loading": 0.002673816680908203,
+    "Time_Epoch": 0.0071858525276184086,
+    "Time_Log_Info": 0.0002446770668029785,
+    "Time_Process_Batch": 0.00026691754659016926,
+    "Time_Train_Batch": 0.003962572415669759
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 20 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 227.27it/s] 47%|####6     | 47/100 [00:00<00:00, 230.94it/s] 71%|#######1  | 71/100 [00:00<00:00, 231.84it/s] 95%|#########5| 95/100 [00:00<00:00, 231.06it/s]100%|##########| 100/100 [00:00<00:00, 231.73it/s]
+Train Epoch 21
+{
+    "Cosine_Loss": 0.2711294412612915,
+    "L1_Loss": 0.021229722425341605,
+    "L2_Loss": 0.04336230909451842,
+    "Loss": 0.04336230909451842,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.11384892283658701,
+    "Time_Data_Loading": 0.0025817116101582846,
+    "Time_Epoch": 0.0072116772333780926,
+    "Time_Log_Info": 0.0002451300621032715,
+    "Time_Process_Batch": 0.0002959847450256348,
+    "Time_Train_Batch": 0.0040513555208841956
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 21 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 24%|##4       | 24/100 [00:00<00:00, 230.63it/s] 48%|####8     | 48/100 [00:00<00:00, 232.28it/s] 72%|#######2  | 72/100 [00:00<00:00, 227.90it/s] 95%|#########5| 95/100 [00:00<00:00, 227.63it/s]100%|##########| 100/100 [00:00<00:00, 227.79it/s]
+Train Epoch 22
+{
+    "Cosine_Loss": 0.27347096920013425,
+    "L1_Loss": 0.02132123928517103,
+    "L2_Loss": 0.04368563544005156,
+    "Loss": 0.04368563544005156,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.13708155804182753,
+    "Time_Data_Loading": 0.0027665972709655763,
+    "Time_Epoch": 0.007336338361104329,
+    "Time_Log_Info": 0.0002360224723815918,
+    "Time_Process_Batch": 0.0002723256746927897,
+    "Time_Train_Batch": 0.004020138581593832
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 22 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 24%|##4       | 24/100 [00:00<00:00, 232.47it/s] 48%|####8     | 48/100 [00:00<00:00, 229.58it/s] 71%|#######1  | 71/100 [00:00<00:00, 223.48it/s] 94%|#########3| 94/100 [00:00<00:00, 225.53it/s]100%|##########| 100/100 [00:00<00:00, 227.18it/s]
+Train Epoch 23
+{
+    "Cosine_Loss": 0.2608036024868488,
+    "L1_Loss": 0.021036482760682703,
+    "L2_Loss": 0.04316663354635239,
+    "Loss": 0.04316663354635239,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.13166643566262792,
+    "Time_Data_Loading": 0.0026468237241109214,
+    "Time_Epoch": 0.007357267538706461,
+    "Time_Log_Info": 0.00024289687474568684,
+    "Time_Process_Batch": 0.0002653320630391439,
+    "Time_Train_Batch": 0.004159299532572428
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 23 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 220.50it/s] 47%|####6     | 47/100 [00:00<00:00, 229.08it/s] 71%|#######1  | 71/100 [00:00<00:00, 229.65it/s] 94%|#########3| 94/100 [00:00<00:00, 228.88it/s]100%|##########| 100/100 [00:00<00:00, 227.71it/s]
+Train Epoch 24
+{
+    "Cosine_Loss": 0.26720283716917037,
+    "L1_Loss": 0.02039818573743105,
+    "L2_Loss": 0.041759866606444124,
+    "Loss": 0.041759866606444124,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.14687887748088543,
+    "Time_Data_Loading": 0.002732698122660319,
+    "Time_Epoch": 0.007334121068318685,
+    "Time_Log_Info": 0.00022755066553751627,
+    "Time_Process_Batch": 0.0002664367357889811,
+    "Time_Train_Batch": 0.004071390628814698
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 24 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 228.63it/s] 47%|####6     | 47/100 [00:00<00:00, 234.70it/s] 71%|#######1  | 71/100 [00:00<00:00, 234.41it/s] 95%|#########5| 95/100 [00:00<00:00, 226.98it/s]100%|##########| 100/100 [00:00<00:00, 228.20it/s]
+Train Epoch 25
+{
+    "Cosine_Loss": 0.27345550552010534,
+    "L1_Loss": 0.021239637341350318,
+    "L2_Loss": 0.043665679711848496,
+    "Loss": 0.043665679711848496,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.16357136267222813,
+    "Time_Data_Loading": 0.0026851614316304524,
+    "Time_Epoch": 0.0073245604832967125,
+    "Time_Log_Info": 0.00022591352462768554,
+    "Time_Process_Batch": 0.0002705772717793783,
+    "Time_Train_Batch": 0.004100275039672851
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 25 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 20%|##        | 20/100 [00:00<00:00, 199.74it/s] 41%|####1     | 41/100 [00:00<00:00, 205.46it/s] 62%|######2   | 62/100 [00:00<00:00, 207.37it/s] 84%|########4 | 84/100 [00:00<00:00, 211.67it/s]100%|##########| 100/100 [00:00<00:00, 215.89it/s]
+Train Epoch 26
+{
+    "Cosine_Loss": 0.26072713375091555,
+    "L1_Loss": 0.020366639802232384,
+    "L2_Loss": 0.04179787965491414,
+    "Loss": 0.04179787965491414,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.14537124808379304,
+    "Time_Data_Loading": 0.0027054667472839354,
+    "Time_Epoch": 0.007738224665323893,
+    "Time_Log_Info": 0.00019644498825073243,
+    "Time_Process_Batch": 0.00037073294321695964,
+    "Time_Train_Batch": 0.00442810853322347
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 26 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 29%|##9       | 29/100 [00:00<00:00, 287.26it/s] 59%|#####8    | 59/100 [00:00<00:00, 291.73it/s] 89%|########9 | 89/100 [00:00<00:00, 272.98it/s]100%|##########| 100/100 [00:00<00:00, 272.64it/s]
+Train Epoch 27
+{
+    "Cosine_Loss": 0.2617459672689438,
+    "L1_Loss": 0.019876377852633596,
+    "L2_Loss": 0.04073163382709026,
+    "Loss": 0.04073163382709026,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.13500193158557522,
+    "Time_Data_Loading": 0.002377490202585856,
+    "Time_Epoch": 0.006127301851908366,
+    "Time_Log_Info": 0.0002647956212361654,
+    "Time_Process_Batch": 0.0002635955810546875,
+    "Time_Train_Batch": 0.0031951745351155598
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 27 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 219.76it/s] 46%|####6     | 46/100 [00:00<00:00, 221.80it/s] 69%|######9   | 69/100 [00:00<00:00, 219.29it/s] 92%|#########2| 92/100 [00:00<00:00, 220.97it/s]100%|##########| 100/100 [00:00<00:00, 221.65it/s]
+Train Epoch 28
+{
+    "Cosine_Loss": 0.259471026211977,
+    "L1_Loss": 0.0201091365609318,
+    "L2_Loss": 0.04117727871984243,
+    "Loss": 0.04117727871984243,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.1249562290193353,
+    "Time_Data_Loading": 0.0027841885884602865,
+    "Time_Epoch": 0.00753327210744222,
+    "Time_Log_Info": 0.00021673838297526043,
+    "Time_Process_Batch": 0.00027927557627360024,
+    "Time_Train_Batch": 0.0042148987452189125
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 28 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 218.11it/s] 45%|####5     | 45/100 [00:00<00:00, 223.18it/s] 69%|######9   | 69/100 [00:00<00:00, 228.07it/s] 92%|#########2| 92/100 [00:00<00:00, 227.99it/s]100%|##########| 100/100 [00:00<00:00, 227.06it/s]
+Train Epoch 29
+{
+    "Cosine_Loss": 0.2548462736606598,
+    "L1_Loss": 0.019311424558982253,
+    "L2_Loss": 0.039608828127384185,
+    "Loss": 0.039608828127384185,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.12919861448805023,
+    "Time_Data_Loading": 0.002760434150695801,
+    "Time_Epoch": 0.00735393762588501,
+    "Time_Log_Info": 0.00023726224899291992,
+    "Time_Process_Batch": 0.0002709865570068359,
+    "Time_Train_Batch": 0.004052996635437012
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 29 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 213.12it/s] 46%|####6     | 46/100 [00:00<00:00, 225.03it/s] 69%|######9   | 69/100 [00:00<00:00, 220.85it/s] 92%|#########2| 92/100 [00:00<00:00, 215.36it/s]100%|##########| 100/100 [00:00<00:00, 218.58it/s]
+Train Epoch 30
+{
+    "Cosine_Loss": 0.25930877432227134,
+    "L1_Loss": 0.019458066476508974,
+    "L2_Loss": 0.03981641476973891,
+    "Loss": 0.03981641476973891,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.15425232363100805,
+    "Time_Data_Loading": 0.002928507328033447,
+    "Time_Epoch": 0.007638712724049886,
+    "Time_Log_Info": 0.00023475090662638347,
+    "Time_Process_Batch": 0.0002783974011739095,
+    "Time_Train_Batch": 0.004158290227254232
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 30 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 220.73it/s] 46%|####6     | 46/100 [00:00<00:00, 216.77it/s] 69%|######9   | 69/100 [00:00<00:00, 220.01it/s] 92%|#########2| 92/100 [00:00<00:00, 222.15it/s]100%|##########| 100/100 [00:00<00:00, 222.05it/s]
+Train Epoch 31
+{
+    "Cosine_Loss": 0.2553324972093105,
+    "L1_Loss": 0.019538416340947152,
+    "L2_Loss": 0.040211926568299534,
+    "Loss": 0.040211926568299534,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.14622480181322317,
+    "Time_Data_Loading": 0.0028380393981933595,
+    "Time_Epoch": 0.007520107428232828,
+    "Time_Log_Info": 0.0002378384272257487,
+    "Time_Process_Batch": 0.00029821395874023436,
+    "Time_Train_Batch": 0.004107809066772461
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 31 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 24%|##4       | 24/100 [00:00<00:00, 239.67it/s] 48%|####8     | 48/100 [00:00<00:00, 229.48it/s] 71%|#######1  | 71/100 [00:00<00:00, 226.63it/s] 94%|#########3| 94/100 [00:00<00:00, 224.87it/s]100%|##########| 100/100 [00:00<00:00, 226.78it/s]
+Train Epoch 32
+{
+    "Cosine_Loss": 0.2556869313120842,
+    "L1_Loss": 0.019446919905021787,
+    "L2_Loss": 0.03996730050072074,
+    "Loss": 0.03996730050072074,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.15579804428165517,
+    "Time_Data_Loading": 0.0026954929033915203,
+    "Time_Epoch": 0.007371207078297933,
+    "Time_Log_Info": 0.00023711125055948893,
+    "Time_Process_Batch": 0.0002672394116719564,
+    "Time_Train_Batch": 0.004127120971679688
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 32 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 225.46it/s] 46%|####6     | 46/100 [00:00<00:00, 227.90it/s] 70%|#######   | 70/100 [00:00<00:00, 230.27it/s] 94%|#########3| 94/100 [00:00<00:00, 226.22it/s]100%|##########| 100/100 [00:00<00:00, 227.81it/s]
+Train Epoch 33
+{
+    "Cosine_Loss": 0.26367998257279396,
+    "L1_Loss": 0.01942196233198047,
+    "L2_Loss": 0.03990613924339414,
+    "Loss": 0.03990613924339414,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.1545789558535762,
+    "Time_Data_Loading": 0.0026886781056722005,
+    "Time_Epoch": 0.007329459985097249,
+    "Time_Log_Info": 0.00023303031921386718,
+    "Time_Process_Batch": 0.0002636909484863281,
+    "Time_Train_Batch": 0.004113133748372396
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 33 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 217.47it/s] 45%|####5     | 45/100 [00:00<00:00, 224.33it/s] 68%|######8   | 68/100 [00:00<00:00, 223.74it/s] 91%|#########1| 91/100 [00:00<00:00, 223.36it/s]100%|##########| 100/100 [00:00<00:00, 223.48it/s]
+Train Epoch 34
+{
+    "Cosine_Loss": 0.2552537028491497,
+    "L1_Loss": 0.019160943357273936,
+    "L2_Loss": 0.039343007821589705,
+    "Loss": 0.039343007821589705,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.17849389018185322,
+    "Time_Data_Loading": 0.0027649720509847005,
+    "Time_Epoch": 0.007474044958750407,
+    "Time_Log_Info": 0.00023710330327351888,
+    "Time_Process_Batch": 0.00032173792521158855,
+    "Time_Train_Batch": 0.004111985365549724
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 34 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 23%|##3       | 23/100 [00:00<00:00, 228.30it/s] 46%|####6     | 46/100 [00:00<00:00, 226.85it/s] 69%|######9   | 69/100 [00:00<00:00, 223.28it/s] 92%|#########2| 92/100 [00:00<00:00, 224.14it/s]100%|##########| 100/100 [00:00<00:00, 224.59it/s]
+Train Epoch 35
+{
+    "Cosine_Loss": 0.262791750729084,
+    "L1_Loss": 0.019415690563619137,
+    "L2_Loss": 0.03996107757091522,
+    "Loss": 0.03996107757091522,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.18117220059975808,
+    "Time_Data_Loading": 0.002601798375447591,
+    "Time_Epoch": 0.007433652877807617,
+    "Time_Log_Info": 0.0002347985903422038,
+    "Time_Process_Batch": 0.00029284159342447916,
+    "Time_Train_Batch": 0.004264704386393229
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 35 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 24%|##4       | 24/100 [00:00<00:00, 231.31it/s] 48%|####8     | 48/100 [00:00<00:00, 222.08it/s] 72%|#######2  | 72/100 [00:00<00:00, 226.96it/s] 95%|#########5| 95/100 [00:00<00:00, 224.84it/s]100%|##########| 100/100 [00:00<00:00, 225.34it/s]
+Train Epoch 36
+{
+    "Cosine_Loss": 0.24963491290807724,
+    "L1_Loss": 0.019010044690221547,
+    "L2_Loss": 0.03907824456691742,
+    "Loss": 0.03907824456691742,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.18573074548130536,
+    "Time_Data_Loading": 0.002552616596221924,
+    "Time_Epoch": 0.007418715953826904,
+    "Time_Log_Info": 0.00023781061172485353,
+    "Time_Process_Batch": 0.00030432542165120444,
+    "Time_Train_Batch": 0.004280591011047363
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 36 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 22%|##2       | 22/100 [00:00<00:00, 212.12it/s] 44%|####4     | 44/100 [00:00<00:00, 209.21it/s] 66%|######6   | 66/100 [00:00<00:00, 211.75it/s] 88%|########8 | 88/100 [00:00<00:00, 214.05it/s]100%|##########| 100/100 [00:00<00:00, 213.93it/s]
+Train Epoch 37
+{
+    "Cosine_Loss": 0.25338285610079764,
+    "L1_Loss": 0.018907757410779595,
+    "L2_Loss": 0.03891045775264502,
+    "Loss": 0.03891045775264502,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.18240527007292257,
+    "Time_Data_Loading": 0.0027074495951334636,
+    "Time_Epoch": 0.007811915874481201,
+    "Time_Log_Info": 0.00019592046737670898,
+    "Time_Process_Batch": 0.00034770170847574867,
+    "Time_Train_Batch": 0.004518206914265951
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 37 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 21%|##1       | 21/100 [00:00<00:00, 207.56it/s] 44%|####4     | 44/100 [00:00<00:00, 219.24it/s] 66%|######6   | 66/100 [00:00<00:00, 218.13it/s] 88%|########8 | 88/100 [00:00<00:00, 212.33it/s]100%|##########| 100/100 [00:00<00:00, 213.61it/s]
+Train Epoch 38
+{
+    "Cosine_Loss": 0.2547095121443272,
+    "L1_Loss": 0.01891035311855376,
+    "L2_Loss": 0.03887232298031449,
+    "Loss": 0.03887232298031449,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.15454033574779713,
+    "Time_Data_Loading": 0.002715615431467692,
+    "Time_Epoch": 0.007819279034932455,
+    "Time_Log_Info": 0.0002043445905049642,
+    "Time_Process_Batch": 0.00037853320439656577,
+    "Time_Train_Batch": 0.004484601815541585
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 38 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 19%|#9        | 19/100 [00:00<00:00, 181.88it/s] 39%|###9      | 39/100 [00:00<00:00, 190.64it/s] 59%|#####8    | 59/100 [00:00<00:00, 193.71it/s] 81%|########1 | 81/100 [00:00<00:00, 202.31it/s]100%|##########| 100/100 [00:00<00:00, 200.48it/s]
+Train Epoch 39
+{
+    "Cosine_Loss": 0.25589204505085944,
+    "L1_Loss": 0.019173172730952502,
+    "L2_Loss": 0.03964008776471019,
+    "Loss": 0.03964008776471019,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.20214774800395388,
+    "Time_Data_Loading": 0.0026467005411783856,
+    "Time_Epoch": 0.00832616885503133,
+    "Time_Log_Info": 0.0001988967259724935,
+    "Time_Process_Batch": 0.0004711747169494629,
+    "Time_Train_Batch": 0.004977130889892578
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 39 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 18%|#8        | 18/100 [00:00<00:00, 179.06it/s] 36%|###6      | 36/100 [00:00<00:00, 160.11it/s] 54%|#####4    | 54/100 [00:00<00:00, 168.01it/s] 71%|#######1  | 71/100 [00:00<00:00, 167.13it/s] 88%|########8 | 88/100 [00:00<00:00, 167.63it/s]100%|##########| 100/100 [00:00<00:00, 169.23it/s]
+Train Epoch 40
+{
+    "Cosine_Loss": 0.2481128080189228,
+    "L1_Loss": 0.018567274734377862,
+    "L2_Loss": 0.038229258731007576,
+    "Loss": 0.038229258731007576,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.1719419788088999,
+    "Time_Data_Loading": 0.0033699750900268556,
+    "Time_Epoch": 0.00986172358194987,
+    "Time_Log_Info": 0.00014048020044962566,
+    "Time_Process_Batch": 0.0005144953727722168,
+    "Time_Train_Batch": 0.005797247091929118
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 40 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 16%|#6        | 16/100 [00:00<00:00, 158.97it/s] 34%|###4      | 34/100 [00:00<00:00, 169.57it/s] 51%|#####1    | 51/100 [00:00<00:00, 162.43it/s] 68%|######8   | 68/100 [00:00<00:00, 158.55it/s] 87%|########7 | 87/100 [00:00<00:00, 168.32it/s]100%|##########| 100/100 [00:00<00:00, 165.31it/s]
+Train Epoch 41
+{
+    "Cosine_Loss": 0.24639456033706664,
+    "L1_Loss": 0.01820189967751503,
+    "L2_Loss": 0.03746798573061824,
+    "Loss": 0.03746798573061824,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.15307737348000955,
+    "Time_Data_Loading": 0.003530399004618327,
+    "Time_Epoch": 0.01009836991628011,
+    "Time_Log_Info": 0.0001513083775838216,
+    "Time_Process_Batch": 0.0005591273307800293,
+    "Time_Train_Batch": 0.005814166863759359
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 41 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 20%|##        | 20/100 [00:00<00:00, 193.51it/s] 40%|####      | 40/100 [00:00<00:00, 191.25it/s] 60%|######    | 60/100 [00:00<00:00, 186.25it/s] 80%|########  | 80/100 [00:00<00:00, 189.86it/s]100%|##########| 100/100 [00:00<00:00, 191.61it/s]100%|##########| 100/100 [00:00<00:00, 190.64it/s]
+Train Epoch 42
+{
+    "Cosine_Loss": 0.2511259913444519,
+    "L1_Loss": 0.018233648436143994,
+    "L2_Loss": 0.03760967144742608,
+    "Loss": 0.03760967144742608,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.1759870458788646,
+    "Time_Data_Loading": 0.0028820077578226725,
+    "Time_Epoch": 0.008757372697194418,
+    "Time_Log_Info": 0.00018184185028076173,
+    "Time_Process_Batch": 0.000510712464650472,
+    "Time_Train_Batch": 0.005144953727722168
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 42 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 20%|##        | 20/100 [00:00<00:00, 191.94it/s] 43%|####3     | 43/100 [00:00<00:00, 208.80it/s] 64%|######4   | 64/100 [00:00<00:00, 204.18it/s] 85%|########5 | 85/100 [00:00<00:00, 205.08it/s]100%|##########| 100/100 [00:00<00:00, 201.97it/s]
+Train Epoch 43
+{
+    "Cosine_Loss": 0.252672353386879,
+    "L1_Loss": 0.018468754291534425,
+    "L2_Loss": 0.038090824335813525,
+    "Loss": 0.038090824335813525,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.18037139537795155,
+    "Time_Data_Loading": 0.0027578592300415037,
+    "Time_Epoch": 0.008267430464426677,
+    "Time_Log_Info": 0.00019827683766682943,
+    "Time_Process_Batch": 0.00047490199406941734,
+    "Time_Train_Batch": 0.004801193873087565
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 43 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 19%|#9        | 19/100 [00:00<00:00, 186.16it/s] 38%|###8      | 38/100 [00:00<00:00, 184.82it/s] 57%|#####6    | 57/100 [00:00<00:00, 171.48it/s] 75%|#######5  | 75/100 [00:00<00:00, 170.65it/s] 94%|#########3| 94/100 [00:00<00:00, 175.71it/s]100%|##########| 100/100 [00:00<00:00, 177.15it/s]
+Train Epoch 44
+{
+    "Cosine_Loss": 0.24553523123264312,
+    "L1_Loss": 0.018036836218088867,
+    "L2_Loss": 0.037066056411713365,
+    "Loss": 0.037066056411713365,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.17673724558295362,
+    "Time_Data_Loading": 0.0031213959058125815,
+    "Time_Epoch": 0.009424312909444173,
+    "Time_Log_Info": 0.00017467737197875976,
+    "Time_Process_Batch": 0.0005707065264383952,
+    "Time_Train_Batch": 0.005514697233835856
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 44 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 21%|##1       | 21/100 [00:00<00:00, 202.46it/s] 42%|####2     | 42/100 [00:00<00:00, 198.39it/s] 62%|######2   | 62/100 [00:00<00:00, 187.78it/s] 81%|########1 | 81/100 [00:00<00:00, 172.15it/s] 99%|#########9| 99/100 [00:00<00:00, 166.44it/s]100%|##########| 100/100 [00:00<00:00, 174.60it/s]
+Train Epoch 45
+{
+    "Cosine_Loss": 0.2509992787241936,
+    "L1_Loss": 0.01850859750062227,
+    "L2_Loss": 0.038196153528988364,
+    "Loss": 0.038196153528988364,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.21216032564445414,
+    "Time_Data_Loading": 0.003273320198059082,
+    "Time_Epoch": 0.009559333324432373,
+    "Time_Log_Info": 0.00013372103373209636,
+    "Time_Process_Batch": 0.0004977027575174968,
+    "Time_Train_Batch": 0.005614733695983887
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 45 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 16%|#6        | 16/100 [00:00<00:00, 158.08it/s] 35%|###5      | 35/100 [00:00<00:00, 175.09it/s] 56%|#####6    | 56/100 [00:00<00:00, 190.37it/s] 76%|#######6  | 76/100 [00:00<00:00, 191.14it/s] 96%|#########6| 96/100 [00:00<00:00, 183.04it/s]100%|##########| 100/100 [00:00<00:00, 183.50it/s]
+Train Epoch 46
+{
+    "Cosine_Loss": 0.24312161087989806,
+    "L1_Loss": 0.01811115948483348,
+    "L2_Loss": 0.0373196554556489,
+    "Loss": 0.0373196554556489,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.19548809370846357,
+    "Time_Data_Loading": 0.003078118960062663,
+    "Time_Epoch": 0.009097397327423096,
+    "Time_Log_Info": 0.00015817880630493165,
+    "Time_Process_Batch": 0.00042967796325683595,
+    "Time_Train_Batch": 0.005393385887145996
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 46 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 21%|##1       | 21/100 [00:00<00:00, 205.78it/s] 42%|####2     | 42/100 [00:00<00:00, 205.36it/s] 64%|######4   | 64/100 [00:00<00:00, 208.97it/s] 85%|########5 | 85/100 [00:00<00:00, 206.85it/s]100%|##########| 100/100 [00:00<00:00, 201.53it/s]
+Train Epoch 47
+{
+    "Cosine_Loss": 0.2413569673895836,
+    "L1_Loss": 0.01813967015594244,
+    "L2_Loss": 0.03750769885256886,
+    "Loss": 0.03750769885256886,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.17794940944058907,
+    "Time_Data_Loading": 0.00282819668451945,
+    "Time_Epoch": 0.008283027013142904,
+    "Time_Log_Info": 0.00016965468724568686,
+    "Time_Process_Batch": 0.00037082831064860024,
+    "Time_Train_Batch": 0.004877758026123047
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 47 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 19%|#9        | 19/100 [00:00<00:00, 186.56it/s] 40%|####      | 40/100 [00:00<00:00, 194.19it/s] 60%|######    | 60/100 [00:00<00:00, 186.18it/s] 80%|########  | 80/100 [00:00<00:00, 188.24it/s] 99%|#########9| 99/100 [00:00<00:00, 183.85it/s]100%|##########| 100/100 [00:00<00:00, 185.21it/s]
+Train Epoch 48
+{
+    "Cosine_Loss": 0.24507817894220352,
+    "L1_Loss": 0.01823614307679236,
+    "L2_Loss": 0.037634648885577916,
+    "Loss": 0.037634648885577916,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.19284077056461682,
+    "Time_Data_Loading": 0.0031461556752522784,
+    "Time_Epoch": 0.009012707074483236,
+    "Time_Log_Info": 0.00015175739924112955,
+    "Time_Process_Batch": 0.0004566828409830729,
+    "Time_Train_Batch": 0.00522079865137736
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 48 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 20%|##        | 20/100 [00:00<00:00, 191.17it/s] 40%|####      | 40/100 [00:00<00:00, 178.89it/s] 58%|#####8    | 58/100 [00:00<00:00, 173.79it/s] 76%|#######6  | 76/100 [00:00<00:00, 161.86it/s] 95%|#########5| 95/100 [00:00<00:00, 170.69it/s]100%|##########| 100/100 [00:00<00:00, 173.79it/s]
+Train Epoch 49
+{
+    "Cosine_Loss": 0.2434769943356514,
+    "L1_Loss": 0.018021954698488118,
+    "L2_Loss": 0.037186545711010696,
+    "Loss": 0.037186545711010696,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.2028898952061354,
+    "Time_Data_Loading": 0.0035526116689046225,
+    "Time_Epoch": 0.009605777263641358,
+    "Time_Log_Info": 0.00018080472946166993,
+    "Time_Process_Batch": 0.0005729039510091146,
+    "Time_Train_Batch": 0.0052583654721577965
+}
+
+saving latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth...
+
+save checkpoint to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last.pth
+
+saved backup of latest model at /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/last_bak.pth
+
+
+Epoch 49 Memory Usage: 2878 MB
+
+  0%|          | 0/100 [00:00<?, ?it/s] 18%|#8        | 18/100 [00:00<00:00, 178.33it/s] 38%|###8      | 38/100 [00:00<00:00, 185.60it/s] 58%|#####8    | 58/100 [00:00<00:00, 189.93it/s] 77%|#######7  | 77/100 [00:00<00:00, 185.82it/s] 96%|#########6| 96/100 [00:00<00:00, 187.18it/s]100%|##########| 100/100 [00:00<00:00, 187.29it/s]
+Train Epoch 50
+{
+    "Cosine_Loss": 0.24058399289846422,
+    "L1_Loss": 0.017848314130678774,
+    "L2_Loss": 0.03682909943163395,
+    "Loss": 0.03682909943163395,
+    "Optimizer/policy0_lr": 0.0001,
+    "Policy_Grad_Norms": 0.1675481368139117,
+    "Time_Data_Loading": 0.0028490146001180013,
+    "Time_Epoch": 0.008914792537689209,
+    "Time_Log_Info": 0.00016101598739624024,
+    "Time_Process_Batch": 0.0004334211349487305,
+    "Time_Train_Batch": 0.005431358019510905
+}
+video writes to /home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/../bc_trained_models/test/20260321235928/videos/image_224_square_force_v15_epoch_50.mp4
+rollout: env=NutAssemblySquare, horizon=400, use_goals=False, num_episodes=50
+  0%|          | 0/50 [00:00<?, ?it/s]ObservationKeyToModalityDict: robot0_joint_pos not found, adding robot0_joint_pos to mapping with assumed low_dim modality!
+ObservationKeyToModalityDict: robot0_joint_pos_cos not found, adding robot0_joint_pos_cos to mapping with assumed low_dim modality!
+ObservationKeyToModalityDict: robot0_joint_pos_sin not found, adding robot0_joint_pos_sin to mapping with assumed low_dim modality!
+ObservationKeyToModalityDict: robot0_joint_vel not found, adding robot0_joint_vel to mapping with assumed low_dim modality!
+ObservationKeyToModalityDict: robot0_joint_acc not found, adding robot0_joint_acc to mapping with assumed low_dim modality!
+ObservationKeyToModalityDict: robot0_eef_quat_site not found, adding robot0_eef_quat_site to mapping with assumed low_dim modality!
+ObservationKeyToModalityDict: robot0_gripper_qvel not found, adding robot0_gripper_qvel to mapping with assumed low_dim modality!
+ObservationKeyToModalityDict: lang_emb not found, adding lang_emb to mapping with assumed low_dim modality!
+ObservationKeyToModalityDict: force not found, adding force to mapping with assumed low_dim modality!
+  2%|2         | 1/50 [00:06<05:24,  6.63s/it]  4%|4         | 2/50 [00:12<04:47,  5.99s/it]  6%|6         | 3/50 [00:17<04:22,  5.58s/it]  8%|8         | 4/50 [00:22<04:09,  5.42s/it]  8%|8         | 4/50 [00:25<04:53,  6.38s/it]
+Traceback (most recent call last):
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 574, in <module>
+    main(args)
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 518, in main
+    train(config, device=device, resume=args.resume)
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/scripts/train.py", line 382, in train
+    all_rollout_logs, video_paths = TrainUtils.rollout_with_stats(
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/utils/train_utils.py", line 522, in rollout_with_stats
+    rollout_info = run_rollout(
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/utils/train_utils.py", line 357, in run_rollout
+    ob_dict, r, done, _ = env.step(ac)
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robomimic/robomimic/envs/env_robosuite.py", line 139, in step
+    obs, r, done, info = self.env.step(action)
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite/robosuite/environments/base.py", line 503, in step
+    self.sim.step()
+  File "/home/hisham246/uwaterloo/ME780_Collaborative_Robotics/robosuite/robosuite/utils/binding_utils.py", line 1096, in step
+    mujoco.mj_step(self.model._model, self.data._data)
+KeyboardInterrupt

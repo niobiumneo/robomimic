@@ -6,13 +6,13 @@
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": false,
-            "log_wandb": false,
+            "log_wandb": true,
             "wandb_proj_name": "cami"
         },
         "save": {
             "enabled": true,
             "every_n_seconds": null,
-            "every_n_epochs": 50,
+            "every_n_epochs": 10,
             "epochs": [],
             "on_best_validation": false,
             "on_best_rollout_return": false,
@@ -28,9 +28,9 @@
         "video_skip": 5,
         "rollout": {
             "enabled": true,
-            "n": 50,
+            "n": 10,
             "horizon": 400,
-            "rate": 50,
+            "rate": 10,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -68,7 +68,7 @@
         "goal_mode": null,
         "cuda": true,
         "batch_size": 32,
-        "num_epochs": 2000,
+        "num_epochs": 200,
         "seed": 1,
         "max_grad_norm": null
     },

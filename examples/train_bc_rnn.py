@@ -117,7 +117,7 @@ def robosuite_hyperparameters(config):
         "object",
         "force"
     ]
-    config.observation.modalities.obs.rgb = []                # no image observations
+    config.observation.modalities.obs.rgb = ["agentview_image", "robot0_eye_in_hand_image"]
     config.observation.modalities.goal.low_dim = []             # no low-dim goals
     config.observation.modalities.goal.rgb = []               # no image goals
 

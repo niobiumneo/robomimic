@@ -55,7 +55,7 @@ def robosuite_hyperparameters(config):
 
     ## rendering config ##
     config.experiment.render = False                            # render on-screen or not
-    config.experiment.render_video = True                       # render evaluation rollouts to videos
+    config.experiment.render_video = False                       # render evaluation rollouts to videos
     config.experiment.keep_all_videos = False                   # save all videos, instead of only saving those for saved model checkpoints
     config.experiment.video_skip = 5                            # render video frame every n environment steps during rollout
 
@@ -115,6 +115,7 @@ def robosuite_hyperparameters(config):
         "robot0_eef_quat",
         "robot0_gripper_qpos",
         "object",
+        "force"
     ]
     config.observation.modalities.obs.rgb = []                # no image observations
     config.observation.modalities.goal.low_dim = []             # no low-dim goals
@@ -371,8 +372,8 @@ def get_config(dataset_type="robosuite", dataset_path=None, output_dir=None, deb
     config.experiment.name = f"{dataset_type}_bc_rnn_example"   # name of experiment used to make log files
     config.experiment.validate = True                           # whether to do validation or not
     config.experiment.logging.terminal_output_to_txt = False    # whether to log stdout to txt file 
-    config.experiment.logging.log_tb = True                     # enable tensorboard logging
-
+    config.experiment.logging.log_tb = False                     # enable tensorboard logging
+    config.experiment.logging.log_wandb = True
     ### Train Config ###
     config.train.data = dataset_path                            # path to hdf5 dataset
 

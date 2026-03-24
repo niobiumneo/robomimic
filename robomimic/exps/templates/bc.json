@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../bc_trained_models",
+        "output_dir": "../../bc_trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "all",
@@ -147,7 +147,7 @@
             ]
         },
         "rnn": {
-            "enabled": false,
+            "enabled": true,
             "horizon": 10,
             "hidden_dim": 400,
             "rnn_type": "LSTM",

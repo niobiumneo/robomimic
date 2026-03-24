@@ -107,7 +107,7 @@ def robosuite_hyperparameters(config):
 
     ## learning config ##
     config.train.cuda = True                                    # try to use GPU (if present) or not
-    config.train.batch_size = 100                               # batch size
+    config.train.batch_size = 32                               # batch size
     config.train.num_epochs = 2000                              # number of training epochs
     config.train.seed = 1                                       # seed for training
 

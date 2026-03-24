@@ -62,9 +62,9 @@ def robosuite_hyperparameters(config):
 
     ## evaluation rollout config ##
     config.experiment.rollout.enabled = True                    # enable evaluation rollouts
-    config.experiment.rollout.n = 1                            # number of rollouts per evaluation
+    config.experiment.rollout.n = 50                            # number of rollouts per evaluation
     config.experiment.rollout.horizon = 400                     # set horizon based on length of demonstrations (can be obtained with scripts/get_dataset_info.py)
-    config.experiment.rollout.rate = 1                         # do rollouts every @rate epochs
+    config.experiment.rollout.rate = 50                         # do rollouts every @rate epochs
     config.experiment.rollout.warmstart = 0                     # number of epochs to wait before starting rollouts
     config.experiment.rollout.terminate_on_success = True       # end rollout early after task success
 
@@ -243,7 +243,7 @@ def momart_hyperparameters(config):
     # by far the fastest for data loading. Set to "low_dim" to cache all non-image data. Set
     # to None to use no caching - in this case, every batch sample is retrieved via file i/o.
     # You should almost never set this to None, even for large image datasets.
-    config.train.hdf5_cache_mode = "low_dim"
+    config.train.hdf5_cache_mode = "all"
 
     config.train.hdf5_use_swmr = True                           # used for parallel data loading
 

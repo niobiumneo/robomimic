@@ -6,7 +6,7 @@
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": false,
-            "log_wandb": false,
+            "log_wandb": true,
             "wandb_proj_name": "bc_rnn"
         },
         "save": {
@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../../bc_rnn_trained_models",
+        "output_dir": "../../bc_rnn_with_force",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "all",
@@ -67,7 +67,7 @@
         },
         "goal_mode": null,
         "cuda": true,
-        "batch_size": 32,
+        "batch_size": 100,
         "num_epochs": 2000,
         "seed": 1,
         "max_grad_norm": 1.0

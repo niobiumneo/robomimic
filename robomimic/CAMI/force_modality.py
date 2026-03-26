@@ -10,7 +10,7 @@ class ForceModality(Modality):
     FORCE_MEAN = None
     FORCE_STD = None
     EPS = 1e-6
-    CLIP = 5.0
+    CLIP = 10.0
 
     @classmethod
     def set_normalization_stats(cls, mean, std, clip=5.0):

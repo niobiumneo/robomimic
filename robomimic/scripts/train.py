@@ -556,6 +556,12 @@ def main(args):
     # lock config to prevent further modifications and ensure missing keys raise errors
     config.lock()
 
+    print("\n[DEBUG] observation modalities:")
+    print(config.observation.modalities)
+
+    print("\n[DEBUG] observation encoders:")
+    print(config.observation.encoder)
+
     # catch error during training and print it
     res_str = "finished run successfully!"
     try:

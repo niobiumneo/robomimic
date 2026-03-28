@@ -25,7 +25,7 @@ class BCCaMIConfig(BCConfig):
         #     self.observation.modalities.obs.low_dim.append("force")
 
         self.observation.modalities.obs.rgb = ["agentview_image", "robot0_eye_in_hand_image"]
-        self.observation.modalities.obs.low_dim = ["robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos", "object", "force"]
+        self.observation.modalities.obs.low_dim = ["robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos", "object"]
 
         self.observation.modalities.goal.rgb = []
         self.observation.modalities.goal.low_dim = []

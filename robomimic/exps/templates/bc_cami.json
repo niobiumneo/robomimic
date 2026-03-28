@@ -217,7 +217,7 @@
             "snippet_horizon": 10,
             "num_negatives": 1,
             "opposite_contact_negatives_only": true,
-            "use_momentum_target": false,
+            "use_momentum_target": true,
             "target_tau": 0.005,
             "image_feature_dim": 128,
             "force_feature_dim": 128,
@@ -253,9 +253,8 @@
                     "robot0_eef_pos",
                     "robot0_eef_quat",
                     "robot0_gripper_qpos",
-                    "object",
-                    "force"                
-                ],
+                    "object"
+                    ],
                 "rgb": [
                     "agentview_image",
                     "robot0_eye_in_hand_image"

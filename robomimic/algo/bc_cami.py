@@ -73,24 +73,24 @@ class BC_CaMI(BC_RNN):
         super(BC_CaMI, self)._create_networks()
 
         contrastive_dim = self.algo_config.cami.contrastive_dim
-        state_hidden = list(
-            getattr(
-                self.algo_config.cami,
-                "state_proj_layers",
-                getattr(self.algo_config.cami, "query_proj_layers", []),
+        # state_hidden = list(
+        #     getattr(
+        #         self.algo_config.cami,
+        #         "state_proj_layers",
+        #         getattr(self.algo_config.cami, "query_proj_layers", []),
+        #     )
+        # )
+        if "state_proj_layers" in self.algo_config.cami:
+            state_hidden = list(self.algo_config.cami.state_proj_layers)
+        elif "query_proj_layers" in self.algo_config.cami:
+            state_hidden = list(self.algo_config.cami.query_proj_layers)
+        else:
+            raise RuntimeError(
+                "CaMI config must define either 'state_proj_layers' or 'query_proj_layers'."
             )
-        )
         key_hidden = list(self.algo_config.cami.key_proj_layers)
 
-        # state encoder input size from current obs s_i
-        state_input_dim = 0
-        for k, shape in self.obs_shapes.items():
-            if k == "contact_label":
-                continue
-            d = 1
-            for s in shape:
-                d *= s
-            state_input_dim += d
+        state_input_dim = self.algo_config.cami.policy_latent_dim
 
         self.nets["state_encoder"] = build_mlp(
             input_dim=state_input_dim,
@@ -99,12 +99,7 @@ class BC_CaMI(BC_RNN):
         )
 
         # snippet input size from tau_i
-        snippet_input_dim = (
-            self.obs_shapes["force"][0]
-            + self.obs_shapes["robot0_eef_pos"][0]
-            + self.obs_shapes["robot0_eef_quat"][0]
-            + self.obs_shapes["robot0_gripper_qpos"][0]
-        )
+        snippet_input_dim = self.ac_dim
 
         self.nets["snippet_encoder"] = nn.LSTM(
             input_size=snippet_input_dim,
@@ -133,7 +128,7 @@ class BC_CaMI(BC_RNN):
     def process_batch_for_training(self, batch):
         """
         Keep BC_RNN-compatible full sequences.
-        Also pull out a contact label for each sequence.
+        Also derive a future-window contact regime label for each sequence.
         """
         input_batch = dict()
         input_batch["obs"] = {
@@ -144,7 +139,7 @@ class BC_CaMI(BC_RNN):
         input_batch["goal_obs"] = batch.get("goal_obs", None)
         input_batch["actions"] = batch["actions"]
 
-        # Contact label k_i
+        # If a contact label is already provided, use it.
         if "contact_label" in batch:
             cl = batch["contact_label"]
         elif "contact_label" in batch["obs"]:
@@ -159,14 +154,45 @@ class BC_CaMI(BC_RNN):
                 cl = cl.squeeze(-1)
             input_batch["contact_label"] = cl
         else:
-            # derive from current force magnitude
-            force_t0 = batch["obs"]["force"][:, 0, :3]
-            force_mag = torch.norm(force_t0, dim=-1)
-            threshold = getattr(self.algo_config.cami, "contact_threshold", 10.0)
-            input_batch["contact_label"] = (force_mag > threshold).float()
+            # Derive label from future window 1..H so it matches tau_i semantics.
+            H = self.algo_config.cami.snippet_horizon
+            contact_threshold = (
+                self.algo_config.cami.contact_threshold
+                if "contact_threshold" in self.algo_config.cami
+                else 10.0
+            )
+            force_seq = batch["obs"]["force"]              # [B, T, 6]
+            T = force_seq.shape[1]
+            end = min(H + 1, T)
+
+            # Use translational force only for contact detection, same as before.
+            future_force = force_seq[:, 1:end, :3]         # [B, <=H, 3]
+
+            if future_force.shape[1] == 0:
+                future_force = force_seq[:, 0:1, :3]
+
+            future_force_mag = torch.norm(future_force, dim=-1)   # [B, <=H]
+
+            # Binary future-contact label:
+            # 1 if contact occurs anywhere in the future window, else 0
+            future_contact = (future_force_mag > contact_threshold).any(dim=1).float()
+            input_batch["contact_label"] = future_contact
+
+            if not hasattr(self, "_debug_printed_contact_stats"):
+                self._debug_printed_contact_stats = False
+
+            if not self._debug_printed_contact_stats:
+                print("\n[BC_CaMI DEBUG] process_batch_for_training")
+                print("  obs['force'] shape           :", tuple(batch["obs"]["force"].shape))
+                print("  actions shape                :", tuple(batch["actions"].shape))
+                print("  contact_label shape          :", tuple(input_batch["contact_label"].shape))
+                print("  contact_label dtype          :", input_batch["contact_label"].dtype)
+                print("  contact_label unique/counts  :", torch.unique(input_batch["contact_label"], return_counts=True))
+                print("  contact positive fraction    :", input_batch["contact_label"].float().mean().item())
+                self._debug_printed_contact_stats = True
 
         return TensorUtils.to_float(TensorUtils.to_device(input_batch, self.device))
-
+    
     def train_on_batch(self, batch, epoch, validate=False):
         """
         Run BC_RNN train step, then update target encoders.
@@ -186,31 +212,35 @@ class BC_CaMI(BC_RNN):
         """
         return {k: obs_seq[k][:, 0] for k in obs_seq}
 
-    def _select_future_snippet(self, obs_seq):
+    def _select_future_snippet(self, batch):
         """
-        Future snippet tau_i from timesteps 1..H, padded if needed.
+        Future snippet tau_i from future expert actions at timesteps 1..H,
+        padded to length H if needed.
+
+        Returns:
+            dict with key:
+                "actions": Tensor of shape [B, H, A]
         """
         H = self.algo_config.cami.snippet_horizon
-        snippet_keys = ["force", "robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos"]
 
-        out = {}
-        for k in snippet_keys:
-            seq = obs_seq[k]
-            T = seq.shape[1]
-            end = min(H + 1, T)
-            snippet = seq[:, 1:end]
+        seq = batch["actions"]  # [B, T, A]
+        T = seq.shape[1]
+        end = min(H + 1, T)
 
-            if snippet.shape[1] < H:
-                if snippet.shape[1] == 0:
-                    snippet = seq[:, 0:1].repeat(1, H, *([1] * (seq.ndim - 2)))
-                else:
-                    pad_count = H - snippet.shape[1]
-                    repeat_shape = [1, pad_count] + [1] * (snippet.ndim - 2)
-                    pad = snippet[:, -1:].repeat(*repeat_shape)
-                    snippet = torch.cat([snippet, pad], dim=1)
+        # take future steps only: 1..H
+        snippet = seq[:, 1:end]
 
-            out[k] = snippet
-        return out
+        # pad to fixed horizon H
+        if snippet.shape[1] < H:
+            if snippet.shape[1] == 0:
+                # degenerate case: no future step available
+                snippet = seq[:, 0:1].repeat(1, H, 1)
+            else:
+                pad_count = H - snippet.shape[1]
+                pad = snippet[:, -1:].repeat(1, pad_count, 1)
+                snippet = torch.cat([snippet, pad], dim=1)
+
+        return {"actions": snippet}
 
     def _make_state_tensor(self, anchor_obs):
         pieces = []
@@ -219,26 +249,21 @@ class BC_CaMI(BC_RNN):
             pieces.append(v.reshape(v.shape[0], -1))
         return torch.cat(pieces, dim=-1)
 
-    def _make_snippet_tensor(self, obs_seq):
-        return torch.cat(
-            [
-                obs_seq["force"],
-                obs_seq["robot0_eef_pos"],
-                obs_seq["robot0_eef_quat"],
-                obs_seq["robot0_gripper_qpos"],
-            ],
-            dim=-1,
-        )
+    def _make_snippet_tensor(self, snippet_dict):
+        return snippet_dict["actions"]
 
-    def _encode_anchor_state(self, anchor_obs):
-        """
-        z_i = psi(s_i)
-        """
-        s = self._make_state_tensor(anchor_obs)
-        z = self.nets["state_encoder"](s)
-        if getattr(self.algo_config.cami, "normalize_embeddings", False):
+    def _encode_anchor_state(self, anchor_latent):
+        z = self.nets["state_encoder"](anchor_latent)
+
+        normalize_embeddings = (
+            self.algo_config.cami.normalize_embeddings
+            if "normalize_embeddings" in self.algo_config.cami
+            else False
+        )
+        if normalize_embeddings:
             z = F.normalize(z, dim=-1)
-        return s, z
+
+        return anchor_latent, z
 
     def _encode_snippet(self, obs_seq, use_target=False):
         """
@@ -256,7 +281,12 @@ class BC_CaMI(BC_RNN):
             feat = h_n[-1]
             emb = self.nets["key_proj"](feat)
 
-        if getattr(self.algo_config.cami, "normalize_embeddings", False):
+        normalize_embeddings = (
+            self.algo_config.cami.normalize_embeddings
+            if "normalize_embeddings" in self.algo_config.cami
+            else False
+        )
+        if normalize_embeddings:
             emb = F.normalize(emb, dim=-1)
 
         return feat, emb
@@ -265,20 +295,43 @@ class BC_CaMI(BC_RNN):
         """
         Forward pass for BC_RNN + CAMI.
         """
-        predictions = OrderedDict()
 
-        # BC_RNN policy branch
-        actions = self.nets["policy"](
+        predictions = OrderedDict()
+        # BC_RNN policy branch with exposed latent
+        policy_actions, policy_feats = self._forward_policy_with_latent(
             obs_dict=batch["obs"],
             goal_dict=batch["goal_obs"],
         )
-        predictions["actions"] = actions
+        predictions["actions"] = policy_actions
 
-        anchor_obs = self._select_anchor_obs(batch["obs"])
-        future_snippet = self._select_future_snippet(batch["obs"])
+        anchor_latent = policy_feats[:, 0, :]   # [B, D]
+
+        future_snippet = self._select_future_snippet(batch)
+
+        if not hasattr(self, "_debug_printed_snippet_stats"):
+            self._debug_printed_snippet_stats = False
+
+        if not self._debug_printed_snippet_stats:
+            print("\n[BC_CaMI DEBUG] _forward_training")
+            print("  batch['actions'] shape          :", tuple(batch["actions"].shape))
+            print("  future_snippet['actions'] shape :", tuple(future_snippet["actions"].shape))
+            print("  first future action sample      :", future_snippet["actions"][0, 0].detach().cpu())
+            self._debug_printed_snippet_stats = True
+        
+
+        if not hasattr(self, "_debug_printed_policy_feature_stats"):
+            self._debug_printed_policy_feature_stats = False
+
+        if not self._debug_printed_policy_feature_stats:
+            print("\n[BC_CaMI DEBUG] policy latent")
+            print("  policy class         :", type(self.nets["policy"]))
+            print("  policy_actions shape :", tuple(policy_actions.shape))
+            print("  policy_feats shape   :", tuple(policy_feats.shape))
+            print("  anchor_latent shape  :", tuple(anchor_latent.shape))
+            self._debug_printed_policy_feature_stats = True
 
         # PDF-style state query
-        _, state_query = self._encode_anchor_state(anchor_obs)
+        _, state_query = self._encode_anchor_state(anchor_latent)
         predictions["state_query_embedding"] = state_query
 
         # online snippet query, SaMI-style
@@ -298,6 +351,56 @@ class BC_CaMI(BC_RNN):
         predictions["target_key_embedding"] = target_key_embedding
 
         return predictions
+    
+    def _forward_policy_with_latent(self, obs_dict, goal_dict=None):
+        """
+        Forward policy and return both action outputs and per-step latent features.
+        """
+        if not hasattr(self.nets["policy"], "forward_with_features"):
+            raise AttributeError(
+                "Policy network does not expose forward_with_features."
+            )
+
+        out = self.nets["policy"].forward_with_features(
+            obs=obs_dict,
+            goal=goal_dict,
+        )
+
+        if not isinstance(out, tuple) or len(out) != 2:
+            raise RuntimeError(
+                "policy.forward_with_features must return (actions, feats), "
+                "but got type {}".format(type(out))
+            )
+
+        actions, feats = out
+
+        if isinstance(actions, dict):
+            if "action" in actions:
+                actions = actions["action"]
+            elif "actions" in actions:
+                actions = actions["actions"]
+            else:
+                raise RuntimeError(
+                    "Policy returned dict outputs but no 'action' or 'actions' key was found. "
+                    f"Available keys: {list(actions.keys())}"
+                )
+
+        if not torch.is_tensor(actions):
+            raise RuntimeError(
+                "Expected policy actions to be a tensor, got {}".format(type(actions))
+            )
+
+        if not torch.is_tensor(feats):
+            raise RuntimeError(
+                "Expected policy feats to be a tensor, got {}".format(type(feats))
+            )
+
+        if feats.ndim != 3:
+            raise RuntimeError(
+                "Expected policy feats with shape [B, T, D], got shape {}".format(tuple(feats.shape))
+            )
+
+        return actions, feats
 
     def _compute_contact_inbatch_cami_loss(self, query_embedding, key_embedding, contact_label):
         """
@@ -311,7 +414,12 @@ class BC_CaMI(BC_RNN):
         """
         beta = self.algo_config.cami.temperature
 
-        if getattr(self.algo_config.cami, "normalize_embeddings", False):
+        normalize_embeddings = (
+            self.algo_config.cami.normalize_embeddings
+            if "normalize_embeddings" in self.algo_config.cami
+            else False
+        )
+        if normalize_embeddings:
             query_embedding = F.normalize(query_embedding, dim=-1)
             key_embedding = F.normalize(key_embedding, dim=-1)
 
@@ -324,6 +432,19 @@ class BC_CaMI(BC_RNN):
         neg_mask = contact_label.unsqueeze(1) != contact_label.unsqueeze(0)
         valid_neg_count = neg_mask.sum(dim=1)
         valid_anchor_mask = valid_neg_count > 0
+
+        if not hasattr(self, "_debug_printed_neg_stats"):
+            self._debug_printed_neg_stats = False
+
+        if not self._debug_printed_neg_stats:
+            print("\n[BC_CaMI DEBUG] _compute_contact_inbatch_cami_loss")
+            print("  contact_label unique/counts :", torch.unique(contact_label, return_counts=True))
+            print("  valid_neg_count min/max/mean:",
+                valid_neg_count.min().item(),
+                valid_neg_count.max().item(),
+                valid_neg_count.float().mean().item())
+            print("  valid_anchor_fraction       :", valid_anchor_mask.float().mean().item())
+            self._debug_printed_neg_stats = True
 
         if valid_anchor_mask.sum() == 0:
             zero = logits.sum() * 0.0
@@ -344,7 +465,13 @@ class BC_CaMI(BC_RNN):
         per_anchor_loss = -(pos_logits - log_denom)
 
         soft_scale_mean = torch.zeros((), device=query_embedding.device)
-        if getattr(self.algo_config.cami, "soft_variant", False):
+        soft_variant = (
+            self.algo_config.cami.soft_variant
+            if "soft_variant" in self.algo_config.cami
+            else False
+        )
+
+        if soft_variant:
             scales = torch.ones(B, device=query_embedding.device, dtype=query_embedding.dtype)
             for i in range(B):
                 if valid_anchor_mask[i]:
@@ -406,7 +533,12 @@ class BC_CaMI(BC_RNN):
         state_cami_loss = zero
         traj_cami_loss = zero
 
-        if getattr(self.algo_config.cami, "enabled", False):
+        cami_enabled = (
+            self.algo_config.cami.enabled
+            if "enabled" in self.algo_config.cami
+            else False
+        )
+        if cami_enabled:
             contact_label = batch["contact_label"].long().view(-1)
             target_key_embedding = predictions["target_key_embedding"]
 
@@ -450,9 +582,17 @@ class BC_CaMI(BC_RNN):
             losses["state_cami_loss"] = zero
             losses["traj_cami_loss"] = zero
 
-        lambda_state = getattr(self.algo_config.cami, "state_loss_weight", self.algo_config.cami.loss_weight)
-        lambda_traj = getattr(self.algo_config.cami, "traj_loss_weight", 1.0)
-
+        # lambda_state = getattr(self.algo_config.cami, "state_loss_weight", self.algo_config.cami.loss_weight)
+        lambda_state = (
+            self.algo_config.cami.state_loss_weight
+            if "state_loss_weight" in self.algo_config.cami
+            else self.algo_config.cami.loss_weight
+        )
+        lambda_traj = (
+            self.algo_config.cami.traj_loss_weight
+            if "traj_loss_weight" in self.algo_config.cami
+            else 1.0
+        )
         losses["action_loss"] = (
             bc_action_loss
             + lambda_state * state_cami_loss
@@ -501,14 +641,25 @@ class BC_CaMI(BC_RNN):
         """
         EMA / Polyak update of target trajectory encoder.
         """
-        if not getattr(self.algo_config.cami, "enabled", False):
-            return
-        if not getattr(self.algo_config.cami, "use_momentum_target", True):
+        cami_enabled = (
+            self.algo_config.cami.enabled
+            if "enabled" in self.algo_config.cami
+            else False
+        )
+        if not cami_enabled:
             return
 
-        m = getattr(self.algo_config.cami, "momentum", None)
+        use_momentum_target = (
+            self.algo_config.cami.use_momentum_target
+            if "use_momentum_target" in self.algo_config.cami
+            else True
+        )
+        if not use_momentum_target:
+            return
+
+        m = self.algo_config.cami.momentum if "momentum" in self.algo_config.cami else None
         if m is None:
-            tau = getattr(self.algo_config.cami, "target_tau", 0.05)
+            tau = self.algo_config.cami.target_tau if "target_tau" in self.algo_config.cami else 0.05
             m = 1.0 - tau
 
         for online_param, target_param in zip(

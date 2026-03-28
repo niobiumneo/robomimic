@@ -853,6 +853,90 @@ class RNN_MIMO_MLP(Module):
                 msg="RNN_MIMO_MLP: input_shape inconsistent in temporal dimension")
         # returns a dictionary instead of list since outputs are dictionaries
         return { k : [T] + list(self.output_shapes[k]) for k in self.output_shapes }
+    
+    def forward_features(self, rnn_init_state=None, return_state=False, **inputs):
+        """
+        Return per-step fused latent features before decoder / action head.
+
+        Returns:
+            feats: [B, T, D]
+            optionally rnn_state
+        """
+        for obs_group in self.input_obs_group_shapes:
+            for k in self.input_obs_group_shapes[obs_group]:
+                assert inputs[obs_group][k].ndim - 2 == len(self.input_obs_group_shapes[obs_group][k])
+
+        rnn_inputs = TensorUtils.time_distributed(
+            inputs, self.nets["encoder"], inputs_as_kwargs=True
+        )
+        assert rnn_inputs.ndim == 3  # [B, T, D_enc]
+
+        # IMPORTANT:
+        # This must return raw RNN outputs BEFORE per_step_net is applied.
+        rnn_outputs = self.nets["rnn"].forward(
+            inputs=rnn_inputs,
+            rnn_init_state=rnn_init_state,
+            return_state=return_state,
+            return_raw_outputs=True,
+        )
+
+        if return_state:
+            rnn_outputs, rnn_state = rnn_outputs
+
+        assert rnn_outputs.ndim == 3  # [B, T, D_rnn]
+
+        feats = rnn_outputs
+        if self._has_mlp:
+            feats = TensorUtils.time_distributed(feats, self.nets["mlp"])
+
+        if return_state:
+            return feats, rnn_state
+        return feats
+    
+    def forward_with_features(self, rnn_init_state=None, return_state=False, **inputs):
+        """
+        Return decoded outputs and per-step fused latent features.
+
+        Returns:
+            outputs: dict of [B, T, ...] if per_step=True, else final-step outputs
+            feats:   [B, T, D]
+            optionally rnn_state
+        """
+        for obs_group in self.input_obs_group_shapes:
+            for k in self.input_obs_group_shapes[obs_group]:
+                assert inputs[obs_group][k].ndim - 2 == len(self.input_obs_group_shapes[obs_group][k])
+
+        rnn_inputs = TensorUtils.time_distributed(
+            inputs, self.nets["encoder"], inputs_as_kwargs=True
+        )
+        assert rnn_inputs.ndim == 3  # [B, T, D_enc]
+
+        # IMPORTANT:
+        # This must return raw RNN outputs BEFORE per_step_net is applied.
+        rnn_outputs = self.nets["rnn"].forward(
+            inputs=rnn_inputs,
+            rnn_init_state=rnn_init_state,
+            return_state=return_state,
+            return_raw_outputs=True,
+        )
+
+        if return_state:
+            rnn_outputs, rnn_state = rnn_outputs
+
+        assert rnn_outputs.ndim == 3  # [B, T, D_rnn]
+
+        feats = rnn_outputs
+        if self._has_mlp:
+            feats = TensorUtils.time_distributed(feats, self.nets["mlp"])
+
+        if self.per_step:
+            outputs = TensorUtils.time_distributed(feats, self.nets["decoder"])
+        else:
+            outputs = self.nets["decoder"](feats[:, -1])
+
+        if return_state:
+            return outputs, feats, rnn_state
+        return outputs, feats
 
     def forward(self, rnn_init_state=None, return_state=False, **inputs):
         """

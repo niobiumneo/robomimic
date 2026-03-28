@@ -400,9 +400,9 @@ class RNN_Base(Module):
             out = [input_shape[0], self._num_layers * self._hidden_dim]
         return out
 
-    def forward(self, inputs, rnn_init_state=None, return_state=False):
+    def forward(self, inputs, rnn_init_state=None, return_state=False, return_raw_outputs=False):
         """
-        Forward a sequence of inputs through the RNN and the per-step network.
+        Forward a sequence of inputs through the RNN and optionally the per-step network.
 
         Args:
             inputs (torch.Tensor): tensor input of shape [B, T, D], where D is the RNN input size
@@ -411,8 +411,13 @@ class RNN_Base(Module):
 
             return_state (bool): whether to return hidden state
 
+            return_raw_outputs (bool): if True, return raw RNN outputs before per_step_net
+                is applied. This is useful when downstream code wants access to the latent
+                sequence representation rather than decoded per-step outputs.
+
         Returns:
-            outputs: outputs of the per_step_net
+            outputs: raw RNN outputs [B, T, D_rnn] if return_raw_outputs=True,
+                    otherwise outputs after per_step_net if it exists
 
             rnn_state: return rnn state at the end if return_state is set to True
         """
@@ -422,7 +427,8 @@ class RNN_Base(Module):
             rnn_init_state = self.get_rnn_init_state(batch_size, device=inputs.device)
 
         outputs, rnn_state = self.nets(inputs, rnn_init_state)
-        if self.per_step_net is not None:
+
+        if (self.per_step_net is not None) and (not return_raw_outputs):
             outputs = TensorUtils.time_distributed(outputs, self.per_step_net)
 
         if return_state:

@@ -25,7 +25,7 @@ class BCCaMIConfig(BCConfig):
         #     self.observation.modalities.obs.low_dim.append("force")
 
         self.observation.modalities.obs.rgb = ["agentview_image", "robot0_eye_in_hand_image"]
-        self.observation.modalities.obs.low_dim = ["robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos", "object", "force"],
+        self.observation.modalities.obs.low_dim = ["robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos", "object", "force"]
 
         self.observation.modalities.goal.rgb = []
         self.observation.modalities.goal.low_dim = []
@@ -35,7 +35,7 @@ class BCCaMIConfig(BCConfig):
         super(BCCaMIConfig, self).algo_config()
 
         # make optimizer entries for new CaMI trainable modules
-        self.algo.optim_params.query_proj = deepcopy(self.algo.optim_params.policy)
+        self.algo.optim_params.state_encoder = deepcopy(self.algo.optim_params.policy)
         self.algo.optim_params.snippet_encoder = deepcopy(self.algo.optim_params.policy)
         self.algo.optim_params.key_proj = deepcopy(self.algo.optim_params.policy)
 
@@ -56,6 +56,7 @@ class BCCaMIConfig(BCConfig):
         self.algo.cami.force_feature_dim = 128
         self.algo.cami.fused_feature_dim = 256
         self.algo.cami.contrastive_dim = 128
+        self.algo.cami.policy_latent_dim = 1024
 
         self.algo.cami.anchor_fusion_layers = (256, 256)
         self.algo.cami.query_proj_layers = (128,)

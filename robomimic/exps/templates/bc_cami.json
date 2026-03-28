@@ -6,13 +6,13 @@
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": false,
-            "log_wandb": true,
+            "log_wandb": false,
             "wandb_proj_name": "cami"
         },
         "save": {
             "enabled": true,
             "every_n_seconds": null,
-            "every_n_epochs": 10,
+            "every_n_epochs": 1,
             "epochs": [],
             "on_best_validation": false,
             "on_best_rollout_return": false,
@@ -28,9 +28,9 @@
         "video_skip": 5,
         "rollout": {
             "enabled": true,
-            "n": 10,
+            "n": 1,
             "horizon": 400,
-            "rate": 10,
+            "rate": 1,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -86,7 +86,7 @@
                     "L2": 0.0
                 }
             },
-            "query_proj": {
+            "state_encoder": {
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
@@ -223,6 +223,7 @@
             "force_feature_dim": 128,
             "fused_feature_dim": 256,
             "contrastive_dim": 128,
+            "policy_latent_dim": 1024,
             "anchor_fusion_layers": [
                 256,
                 256

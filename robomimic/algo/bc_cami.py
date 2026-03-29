@@ -33,7 +33,6 @@ import torch.nn.functional as F
 
 import robomimic.utils.loss_utils as LossUtils
 import robomimic.utils.tensor_utils as TensorUtils
-import robomimic.utils.torch_utils as TorchUtils
 
 from robomimic.algo import register_algo_factory_func
 from robomimic.algo.bc import BC_RNN
@@ -128,18 +127,16 @@ class BC_CaMI(BC_RNN):
     def process_batch_for_training(self, batch):
         """
         Keep BC_RNN-compatible full sequences.
-        Also derive a future-window contact regime label for each sequence.
+
+        Force is NOT used as a policy observation.
+        Contact labels are expected to be precomputed offline and stored in the batch
+        (either as batch["contact_label"] or batch["obs"]["contact_label"]).
         """
         input_batch = dict()
-        input_batch["obs"] = {
-            k: batch["obs"][k]
-            for k in batch["obs"]
-            if k != "contact_label"
-        }
         input_batch["goal_obs"] = batch.get("goal_obs", None)
         input_batch["actions"] = batch["actions"]
 
-        # If a contact label is already provided, use it.
+        # Read precomputed contact label only
         if "contact_label" in batch:
             cl = batch["contact_label"]
         elif "contact_label" in batch["obs"]:
@@ -147,49 +144,41 @@ class BC_CaMI(BC_RNN):
         else:
             cl = None
 
-        if cl is not None:
-            if cl.ndim > 1:
-                cl = cl[:, 0]
-            if cl.ndim > 1:
-                cl = cl.squeeze(-1)
-            input_batch["contact_label"] = cl
-        else:
-            # Derive label from future window 1..H so it matches tau_i semantics.
-            H = self.algo_config.cami.snippet_horizon
-            contact_threshold = (
-                self.algo_config.cami.contact_threshold
-                if "contact_threshold" in self.algo_config.cami
-                else 10.0
+        if cl is None:
+            raise KeyError(
+                "Missing contact_label in batch. "
+                "For privileged-force CaMI, precompute contact_label offline and store it in the dataset."
             )
-            force_seq = batch["obs"]["force"]              # [B, T, 6]
-            T = force_seq.shape[1]
-            end = min(H + 1, T)
 
-            # Use translational force only for contact detection, same as before.
-            future_force = force_seq[:, 1:end, :3]         # [B, <=H, 3]
+        # Robust squeeze to [B]
+        if cl.ndim > 1:
+            cl = cl[:, 0]
+        if cl.ndim > 1:
+            cl = cl.squeeze(-1)
 
-            if future_force.shape[1] == 0:
-                future_force = force_seq[:, 0:1, :3]
+        input_batch["contact_label"] = cl.float()
 
-            future_force_mag = torch.norm(future_force, dim=-1)   # [B, <=H]
+        # Policy obs must stay clean: exclude force and contact_label
+        input_batch["obs"] = {
+            k: batch["obs"][k]
+            for k in batch["obs"]
+            if k not in ["force", "contact_label"]
+        }
 
-            # Binary future-contact label:
-            # 1 if contact occurs anywhere in the future window, else 0
-            future_contact = (future_force_mag > contact_threshold).any(dim=1).float()
-            input_batch["contact_label"] = future_contact
+        if not hasattr(self, "_debug_printed_contact_stats"):
+            self._debug_printed_contact_stats = False
 
-            if not hasattr(self, "_debug_printed_contact_stats"):
-                self._debug_printed_contact_stats = False
-
-            if not self._debug_printed_contact_stats:
-                print("\n[BC_CaMI DEBUG] process_batch_for_training")
-                print("  obs['force'] shape           :", tuple(batch["obs"]["force"].shape))
-                print("  actions shape                :", tuple(batch["actions"].shape))
-                print("  contact_label shape          :", tuple(input_batch["contact_label"].shape))
-                print("  contact_label dtype          :", input_batch["contact_label"].dtype)
-                print("  contact_label unique/counts  :", torch.unique(input_batch["contact_label"], return_counts=True))
-                print("  contact positive fraction    :", input_batch["contact_label"].float().mean().item())
-                self._debug_printed_contact_stats = True
+        if not self._debug_printed_contact_stats:
+            print("\n[BC_CaMI DEBUG] process_batch_for_training")
+            print("  actions shape                :", tuple(batch["actions"].shape))
+            print("  contact_label shape          :", tuple(input_batch["contact_label"].shape))
+            print("  contact_label dtype          :", input_batch["contact_label"].dtype)
+            print("  contact_label unique/counts  :",
+                torch.unique(input_batch["contact_label"], return_counts=True))
+            print("  contact positive fraction    :",
+                input_batch["contact_label"].float().mean().item())
+            print("  policy obs keys              :", list(input_batch["obs"].keys()))
+            self._debug_printed_contact_stats = True
 
         return TensorUtils.to_float(TensorUtils.to_device(input_batch, self.device))
     
@@ -206,11 +195,6 @@ class BC_CaMI(BC_RNN):
             self._update_target_networks()
         return info
 
-    def _select_anchor_obs(self, obs_seq):
-        """
-        Current state s_i from timestep 0.
-        """
-        return {k: obs_seq[k][:, 0] for k in obs_seq}
 
     def _select_future_snippet(self, batch):
         """
@@ -241,13 +225,6 @@ class BC_CaMI(BC_RNN):
                 snippet = torch.cat([snippet, pad], dim=1)
 
         return {"actions": snippet}
-
-    def _make_state_tensor(self, anchor_obs):
-        pieces = []
-        for k in anchor_obs:
-            v = anchor_obs[k]
-            pieces.append(v.reshape(v.shape[0], -1))
-        return torch.cat(pieces, dim=-1)
 
     def _make_snippet_tensor(self, snippet_dict):
         return snippet_dict["actions"]
@@ -539,7 +516,7 @@ class BC_CaMI(BC_RNN):
             else False
         )
         if cami_enabled:
-            contact_label = batch["contact_label"].long().view(-1)
+            contact_label = batch["contact_label"].view(-1)
             target_key_embedding = predictions["target_key_embedding"]
 
             # PDF-style CAMI: psi(s_i) against phi*(tau_i)
@@ -728,13 +705,13 @@ class BC_CaMI(BC_RNN):
         """
         assert not self.nets.training
 
-        if "force" not in obs_dict:
-            if ("robot0_ee_force" in obs_dict) and ("robot0_ee_torque" in obs_dict):
-                obs_dict = dict(obs_dict)
-                obs_dict["force"] = torch.cat(
-                    [obs_dict["robot0_ee_force"], obs_dict["robot0_ee_torque"]],
-                    dim=-1,
-                )
+        # if "force" not in obs_dict:
+        #     if ("robot0_ee_force" in obs_dict) and ("robot0_ee_torque" in obs_dict):
+        #         obs_dict = dict(obs_dict)
+        #         obs_dict["force"] = torch.cat(
+        #             [obs_dict["robot0_ee_force"], obs_dict["robot0_ee_torque"]],
+        #             dim=-1,
+        #         )
 
         expected_keys = list(self.obs_shapes.keys())
         filtered_obs_dict = {k: obs_dict[k] for k in expected_keys if k in obs_dict}

@@ -194,6 +194,32 @@ def compute_force_sequences_with_bias(
 
     return force_rawbias, force_obsbias
 
+def compute_future_contact_labels(force_seq, snippet_horizon=10, contact_threshold=10.0):
+    """
+    force_seq: (T, 6) array
+    uses only translational force [:, :3]
+
+    Returns:
+        contact_label: (T, 1) float32 array
+        where label[t] = 1 if any future step in t+1 ... t+H exceeds threshold
+    """
+    T = force_seq.shape[0]
+    labels = np.zeros((T, 1), dtype=np.float32)
+
+    force_mag = np.linalg.norm(force_seq[:, :3], axis=1)  # (T,)
+
+    for t in range(T):
+        start = t + 1
+        end = min(t + 1 + snippet_horizon, T)
+
+        if start >= end:
+            future_mag = force_mag[t:t+1]
+        else:
+            future_mag = force_mag[start:end]
+
+        labels[t, 0] = 1.0 if np.any(future_mag > contact_threshold) else 0.0
+
+    return labels
 
 def safe_write_dataset(group, name, data):
     if name in group:
@@ -209,6 +235,8 @@ def augment_dataset_with_force(
     force_sensor_name="gripper0_right_force_ee",
     torque_sensor_name="gripper0_right_torque_ee",
     make_force_alias=True,
+    snippet_horizon=10,
+    contact_threshold=10.0
 ):
     if os.path.abspath(extracted_dataset_path) != os.path.abspath(output_dataset_path):
         shutil.copy2(extracted_dataset_path, output_dataset_path)
@@ -246,14 +274,18 @@ def augment_dataset_with_force(
                 torque_sensor_name=torque_sensor_name,
             )
 
-            # Keep full-length alignment
+            contact_label = compute_future_contact_labels(
+                force_seq=force_rawbias,
+                snippet_horizon=snippet_horizon,
+                contact_threshold=contact_threshold,
+            )
+
             obs_force_rawbias = force_rawbias
             obs_force_obsbias = force_obsbias
 
-            # For next_obs, use a one-step shift and repeat the last row
             next_obs_force_rawbias = np.concatenate([force_rawbias[1:], force_rawbias[-1:]], axis=0)
             next_obs_force_obsbias = np.concatenate([force_obsbias[1:], force_obsbias[-1:]], axis=0)
-            
+
             if "obs" not in out_demo:
                 out_demo.create_group("obs")
             if "next_obs" not in out_demo:
@@ -268,7 +300,12 @@ def augment_dataset_with_force(
             safe_write_dataset(obs_grp, "force_obsbias", obs_force_obsbias)
             safe_write_dataset(next_obs_grp, "force_obsbias", next_obs_force_obsbias)
 
-            # Optional default alias -> use raw-sensor-based version
+            safe_write_dataset(out_demo, "contact_label", contact_label)
+
+            safe_write_dataset(obs_grp, "contact_label", contact_label)
+            next_obs_contact_label = np.concatenate([contact_label[1:], contact_label[-1:]], axis=0)
+            safe_write_dataset(next_obs_grp, "contact_label", next_obs_contact_label)
+
             if make_force_alias:
                 safe_write_dataset(obs_grp, "force", obs_force_rawbias)
                 safe_write_dataset(next_obs_grp, "force", next_obs_force_rawbias)
@@ -279,6 +316,9 @@ def augment_dataset_with_force(
             out_demo.attrs["torque_sensor_name"] = torque_sensor_name
             out_demo.attrs["force_rawbias_desc"] = "raw Mujoco sensor retrieval + EMA bias when ncon == 0, unscaled"
             out_demo.attrs["force_obsbias_desc"] = "robosuite obs retrieval + EMA bias when ncon == 0, unscaled"
+            out_demo.attrs["contact_label_desc"] = "binary future-contact label derived from translational force norm over window t+1..t+H"
+            out_demo.attrs["contact_label_horizon"] = int(snippet_horizon)
+            out_demo.attrs["contact_label_threshold"] = float(contact_threshold)
 
             print(f"  obs/force_rawbias      {obs_force_rawbias.shape}")
             print(f"  next_obs/force_rawbias {next_obs_force_rawbias.shape}")
@@ -301,6 +341,8 @@ def main():
     parser.add_argument("--force_sensor_name", type=str, default="gripper0_right_force_ee")
     parser.add_argument("--torque_sensor_name", type=str, default="gripper0_right_torque_ee")
     parser.add_argument("--no_force_alias", action="store_true")
+    parser.add_argument("--snippet_horizon", type=int, default=10)
+    parser.add_argument("--contact_threshold", type=float, default=10.0)
     args = parser.parse_args()
 
     augment_dataset_with_force(
@@ -311,6 +353,8 @@ def main():
         force_sensor_name=args.force_sensor_name,
         torque_sensor_name=args.torque_sensor_name,
         make_force_alias=(not args.no_force_alias),
+        snippet_horizon=args.snippet_horizon,
+        contact_threshold=args.contact_threshold
     )
 
 

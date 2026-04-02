@@ -1,7 +1,7 @@
 {
     "algo_name": "bc",
     "experiment": {
-        "name": "vision_only_100_percent_tool_hang",
+        "name": "vision_only_50_percent_tool_hang",
         "validate": false,
         "logging": {
             "terminal_output_to_txt": true,
@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../../bc_rnn_vision_only_100_percent_tool_hang",
+        "output_dir": "../../bc_rnn_vision_only_50_percent_tool_hang",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",

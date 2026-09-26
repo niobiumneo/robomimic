@@ -9,7 +9,6 @@ with h5py.File(path, "r") as f:
         grp = f[f"data/{ep}"]
         num_samples = int(grp.attrs["num_samples"])
 
-        obs_keys = list(grp["obs"].keys())
         has_force = "force" in grp["obs"]
 
         if not has_force:
@@ -18,13 +17,16 @@ with h5py.File(path, "r") as f:
 
         force_shape = grp["obs"]["force"].shape
 
+        # Check that it is a 2D array (time, features)
         if len(force_shape) != 2:
             bad.append((ep, "obs/force wrong rank", num_samples, force_shape))
             continue
 
+        # Check that the number of timesteps matches num_samples
         if force_shape[0] != num_samples:
             bad.append((ep, "obs/force length mismatch", num_samples, force_shape))
+            continue
 
-print("num bad demos:", len(bad))
-for x in bad[:50]:
-    print(x)
+        # Check that the force vector dimension is exactly 6 (Fx, Fy, Fz, Tx, Ty, Tz)
+        if force_shape[1] != 6:
+            bad.append((ep, f"obs/force wrong vector dimension (expected 6, got {force_shape[1]})", num_samples, force_shape))

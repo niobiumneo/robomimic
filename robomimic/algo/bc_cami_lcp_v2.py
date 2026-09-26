@@ -96,15 +96,117 @@ import robomimic.utils.tensor_utils as TensorUtils
 from robomimic.algo import register_algo_factory_func
 from robomimic.algo.bc import BC_RNN
 
-# Reuse the shared policy-latent / rollout-filtering mixin and the small
-# MLP builder from the LCP-penalty version -- identical in both classes.
-from .bc_cami_lcp_v1 import _PolicyLatentMixin, build_mlp
-
-
 @register_algo_factory_func("bc_cami_cance")
 def algo_config_to_class(algo_config):
     return BC_CaMI_CaNCE, {}
 
+def build_mlp(input_dim, hidden_dims, output_dim):
+    layers = []
+    prev = input_dim
+    for h in hidden_dims:
+        layers.append(nn.Linear(prev, h))
+        layers.append(nn.ReLU())
+        prev = h
+    layers.append(nn.Linear(prev, output_dim))
+    return nn.Sequential(*layers)
+
+
+class _PolicyLatentMixin:
+    """
+    Shared helpers that are identical between discrete BC_CaMI and
+    continuous BC_CaMI_LCP: exposing the policy's internal features during
+    training, and filtering rollout observations at inference time.
+    Both algo classes should inherit this alongside BC_RNN.
+    """
+
+    def _forward_policy_with_latent(self, obs_dict, goal_dict=None, return_obs_encoding=False):
+        """
+        Forward policy and return action outputs, per-step post-RNN latent
+        features (h_i, Eq. 4.4), and optionally the pre-RNN multimodal
+        observation encoding (o_t^v (+proprio), needed for E_v).
+        """
+        if not hasattr(self.nets["policy"], "forward_with_features"):
+            raise AttributeError(
+                "Policy network does not expose forward_with_features."
+            )
+
+        out = self.nets["policy"].forward_with_features(
+            obs=obs_dict,
+            goal=goal_dict,
+            return_obs_encoding=return_obs_encoding,
+        )
+
+        if return_obs_encoding:
+            if not isinstance(out, tuple) or len(out) != 3:
+                raise RuntimeError(
+                    "policy.forward_with_features(return_obs_encoding=True) must "
+                    "return (actions, feats, obs_encoding), but got type {} len {}".format(
+                        type(out), len(out) if isinstance(out, tuple) else "n/a"
+                    )
+                )
+            actions, feats, obs_encoding = out
+        else:
+            if not isinstance(out, tuple) or len(out) != 2:
+                raise RuntimeError(
+                    "policy.forward_with_features must return (actions, feats), "
+                    "but got type {}".format(type(out))
+                )
+            actions, feats = out
+            obs_encoding = None
+
+        if isinstance(actions, dict):
+            if "action" in actions:
+                actions = actions["action"]
+            elif "actions" in actions:
+                actions = actions["actions"]
+            else:
+                raise RuntimeError(
+                    "Policy returned dict outputs but no 'action' or 'actions' key was found. "
+                    f"Available keys: {list(actions.keys())}"
+                )
+
+        if not torch.is_tensor(actions):
+            raise RuntimeError(
+                "Expected policy actions to be a tensor, got {}".format(type(actions))
+            )
+        if not torch.is_tensor(feats):
+            raise RuntimeError(
+                "Expected policy feats to be a tensor, got {}".format(type(feats))
+            )
+        if feats.ndim != 3:
+            raise RuntimeError(
+                "Expected policy feats with shape [B, T, D], got shape {}".format(tuple(feats.shape))
+            )
+        if return_obs_encoding:
+            if not torch.is_tensor(obs_encoding):
+                raise RuntimeError(
+                    "Expected obs_encoding to be a tensor, got {}".format(type(obs_encoding))
+                )
+            if obs_encoding.ndim != 3:
+                raise RuntimeError(
+                    "Expected obs_encoding with shape [B, T, D], got shape {}".format(
+                        tuple(obs_encoding.shape)
+                    )
+                )
+            return actions, feats, obs_encoding
+
+        return actions, feats
+
+    def get_action(self, obs_dict, goal_dict=None):
+        """
+        Preserve BC_RNN rollout behavior. Force and any privileged-only
+        keys are never part of self.obs_shapes, so filtering against
+        expected_keys is sufficient to keep them out of rollout.
+        """
+        assert not self.nets.training
+
+        expected_keys = list(self.obs_shapes.keys())
+        filtered_obs_dict = {k: obs_dict[k] for k in expected_keys if k in obs_dict}
+        missing_keys = [k for k in expected_keys if k not in filtered_obs_dict]
+        if len(missing_keys) > 0:
+            raise KeyError(f"Missing required rollout observation keys: {missing_keys}")
+
+        return super(_PolicyLatentMixin, self).get_action(filtered_obs_dict, goal_dict=goal_dict)
 
 class BC_CaMI_CaNCE(_PolicyLatentMixin, BC_RNN):
     """

@@ -1,7 +1,7 @@
 {
     "algo_name": "bc_cami",
     "experiment": {
-        "name": "cami_50_percent_tool_hang",
+        "name": "cami_huber_tool_hang",
         "validate": false,
         "logging": {
             "terminal_output_to_txt": true,
@@ -38,8 +38,12 @@
         "ckpt_path": null
     },
     "train": {
-        "data": null,
-        "output_dir": "../../bc_rnn_cami_50_percent_tool_hang",
+        "data": [
+            {
+                "path": "/path/to/augmented_tool_hang.hdf5"
+            }
+        ],
+        "output_dir": "../../bc_rnn_cami_huber_tool_hang",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
@@ -56,7 +60,7 @@
             "actions",
             "rewards",
             "dones",
-            "contact_label"
+            "obs/force"
         ],
         "action_keys": [
             "actions"
@@ -71,7 +75,7 @@
         "batch_size": 16,
         "num_epochs": 2000,
         "seed": 1,
-        "max_grad_norm": 1.0
+        "max_grad_norm": 1
     },
     "algo": {
         "optim_params": {
@@ -84,7 +88,7 @@
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 0.0
+                    "L2": 0
                 }
             },
             "state_encoder": {
@@ -96,7 +100,7 @@
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 0.0
+                    "L2": 0
                 }
             },
             "snippet_encoder": {
@@ -108,7 +112,7 @@
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 0.0
+                    "L2": 0
                 }
             },
             "key_proj": {
@@ -120,14 +124,14 @@
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 0.0
+                    "L2": 0
                 }
             }
         },
         "loss": {
-            "l2_weight": 1.0,
-            "l1_weight": 0.0,
-            "cos_weight": 0.0
+            "l2_weight": 1,
+            "l1_weight": 0,
+            "cos_weight": 0
         },
         "actor_layer_dims": [
             1024,
@@ -152,7 +156,7 @@
             "enabled": false,
             "latent_dim": 14,
             "latent_clip": null,
-            "kl_weight": 1.0,
+            "kl_weight": 1,
             "decoder": {
                 "is_conditioned": true,
                 "reconstruction_sum_across_elements": false
@@ -166,7 +170,7 @@
                 "use_categorical": false,
                 "categorical_dim": 10,
                 "categorical_gumbel_softmax_hard": false,
-                "categorical_init_temp": 1.0,
+                "categorical_init_temp": 1,
                 "categorical_temp_anneal_step": 0.001,
                 "categorical_min_temp": 0.3
             },
@@ -213,7 +217,7 @@
             "enabled": true,
             "loss_weight": 0.01,
             "temperature": 0.07,
-            "contact_threshold": 10.0,
+            "contact_threshold": 10,
             "loss_type": "paired_infonce",
             "snippet_horizon": 10,
             "num_negatives": 1,
@@ -244,7 +248,15 @@
             ],
             "force_obs_key": "force",
             "contact_label_key": "contact_label",
-            "normalize_embeddings": true
+            "normalize_embeddings": true,
+            "continuous_contact": {
+                "enabled": true,
+                "force_dataset_key": "obs/force",
+                "force_scale": 50,
+                "huber_delta": 0.1,
+                "contact_temperature": 0.05,
+                "gamma": 1
+            }
         }
     },
     "observation": {
@@ -255,7 +267,7 @@
                     "robot0_eef_quat",
                     "robot0_gripper_qpos",
                     "object"
-                    ],
+                ],
                 "rgb": [
                     "sideview_image",
                     "robot0_eye_in_hand_image"
@@ -277,16 +289,17 @@
                 "obs_randomizer_class": null,
                 "obs_randomizer_kwargs": {}
             },
-        "rgb": {
-            "core_class": "VisualCore",
-            "core_kwargs": {},
-            "obs_randomizer_class": "CropRandomizer",
-            "obs_randomizer_kwargs": {
-                "crop_height": 216, 
-                "crop_width": 216,
-                "num_crops": 1,
-                "pos_enc": false
-            }},
+            "rgb": {
+                "core_class": "VisualCore",
+                "core_kwargs": {},
+                "obs_randomizer_class": "CropRandomizer",
+                "obs_randomizer_kwargs": {
+                    "crop_height": 216,
+                    "crop_width": 216,
+                    "num_crops": 1,
+                    "pos_enc": false
+                }
+            },
             "depth": {
                 "core_class": "VisualCore",
                 "core_kwargs": {},

@@ -139,34 +139,15 @@ def load_data_for_training(config, obs_keys):
 
 
 def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None):
-    """
-    Create a SequenceDataset instance to pass to a torch DataLoader.
-
-    Args:
-        config (BaseConfig instance): config object
-
-        obs_keys (list): list of observation modalities that are required for
-            training (this will inform the dataloader on what modalities to load)
-
-        filter_by_attribute (str): if provided, use the provided filter key
-            to select a subset of demonstration trajectories to load
-
-        dataset_path (str): if provided, the SequenceDataset instance should load
-            data from this dataset path. Defaults to config.train.data.
-
-    Returns:
-        dataset (SequenceDataset instance): dataset object
-    """
+    """Build datasets, including a force-validity mask for continuous CaMI."""
     if dataset_path is None:
         dataset_path = config.train.data
 
-    # NOTE: currently supporting fixed language embedding per dataset
-    ## that is fetched from dataset config and not from file
+    # Preserve the latest branch's fix: the caller reuses obs_keys.
+    # Construct a new list so training cannot alter validation inputs.
     if LangUtils.LANG_EMB_OBS_KEY in obs_keys:
-        ## NOTE: copy rather than mutate, since the caller reuses the same obs_keys list for
-        ## both the train and validation datasets (and in shape_meta afterwards)
-        obs_keys = [k for k in obs_keys if k != LangUtils.LANG_EMB_OBS_KEY]
-        ds_langs = [ds_cfg.get("lang", "dummy") for ds_cfg in config.train.data]
+        obs_keys = [key for key in obs_keys if key != LangUtils.LANG_EMB_OBS_KEY]
+        ds_langs = [entry.get("lang", "dummy") for entry in config.train.data]
     else:
         ds_langs = [None for _ in config.train.data]
 
@@ -176,12 +157,17 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         action_keys=config.train.action_keys,
         dataset_keys=config.train.dataset_keys,
         action_config=config.train.action_config,
-        load_next_obs=config.train.hdf5_load_next_obs, # whether to load next observations (s') from dataset
+        load_next_obs=config.train.hdf5_load_next_obs,
         frame_stack=config.train.frame_stack,
         seq_length=config.train.seq_length,
         pad_frame_stack=config.train.pad_frame_stack,
         pad_seq_length=config.train.pad_seq_length,
-        get_pad_mask=False,
+        # Repeated boundary samples must not enter the force distance.
+        # Other algorithms retain their existing loader behavior.
+        get_pad_mask=(
+            config.algo_name == "bc_cami"
+            and config.algo.cami.get("continuous_contact", {}).get("enabled", False)
+        ),
         goal_mode=config.train.goal_mode,
         hdf5_cache_mode=config.train.hdf5_cache_mode,
         hdf5_use_swmr=config.train.hdf5_use_swmr,
@@ -189,24 +175,25 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         filter_by_attribute=filter_by_attribute,
     )
 
-    ds_kwargs["hdf5_path"] = [ds_cfg["path"] for ds_cfg in config.train.data]
-    ds_kwargs["filter_by_attribute"] = [ds_cfg.get("filter_key", filter_by_attribute) for ds_cfg in config.train.data]
-    ds_kwargs["demo_limit"] = [ds_cfg.get("demo_limit", None) for ds_cfg in config.train.data]
-    ds_weights = [ds_cfg.get("weight", 1.0) for ds_cfg in config.train.data]
+    # Preserve per-dataset filters, limits, weights, and language settings.
+    ds_kwargs["hdf5_path"] = [entry["path"] for entry in config.train.data]
+    ds_kwargs["filter_by_attribute"] = [
+        entry.get("filter_key", filter_by_attribute) for entry in config.train.data
+    ]
+    ds_kwargs["demo_limit"] = [
+        entry.get("demo_limit", None) for entry in config.train.data
+    ]
+    ds_weights = [entry.get("weight", 1.0) for entry in config.train.data]
 
-    meta_ds_kwargs = dict()
-
-    dataset = get_dataset(
+    return get_dataset(
         ds_class=SequenceDataset,
         ds_kwargs=ds_kwargs,
         ds_weights=ds_weights,
         ds_langs=ds_langs,
         normalize_weights_by_ds_size=config.train.normalize_weights_by_ds_size,
         meta_ds_class=MetaDataset,
-        meta_ds_kwargs=meta_ds_kwargs,
+        meta_ds_kwargs={},
     )
-
-    return dataset
 
 
 def get_dataset(

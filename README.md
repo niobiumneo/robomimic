@@ -67,6 +67,16 @@ It offers a broad set of demonstration datasets collected on robot manipulation 
 
 The robomimic framework also makes reproducing the results from different benchmarks and datasets easy. See the [datasets page](https://robomimic.github.io/docs/datasets/overview.html) for more information on downloading datasets and reproducing experiments.
 
+## CaMI dataset regeneration
+
+Use [`rebuild_cami_dataset.py`](rebuild_cami_dataset.py) to replay Square and
+Tool Hang demonstrations with synchronized wrist force/torque and future
+contact labels. The script can download the public raw demonstrations and
+checks replay drift before publishing an output dataset.
+
+See the [CaMI dataset regeneration guide](docs/datasets/cami_regeneration.md)
+for container commands, camera settings, output fields, and force semantics.
+
 ## Docker
 
 You can use the `Dockerfile` to easily build a containerized environment for setting up robomimic with Python 3.9, Miniconda, robosuite, and PyTorch (CPU/GPU support).

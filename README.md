@@ -74,6 +74,9 @@ If you already have an augmented HDF5, see the
 fields and task-specific configs. Training validates stored supervision before
 creating a model and fits continuous CaMI's force scale on the training split.
 
+For online loss curves and rollout results, see the
+[CaMI W&B setup guide](docs/tutorials/cami_wandb.md).
+
 Use [`rebuild_cami_dataset.py`](rebuild_cami_dataset.py) to replay Square and
 Tool Hang demonstrations with synchronized wrist force/torque and future
 contact labels. The script can download the public raw demonstrations and

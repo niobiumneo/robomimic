@@ -115,7 +115,10 @@ python -m robomimic.scripts.train --config robomimic/exps/templates/bc_cami_squa
 ```
 
 Results go into `trained_models/` in the checkout. WandB logging is disabled
-by default; enable `experiment.logging.log_wandb` when you want it.
+by default; add `--wandb --wandb-project cami-contact-state` to enable it.
+See the [W&B setup guide](../docs/tutorials/cami_wandb.md) for login, account
+selection, metrics, and offline syncing. The JSON setting
+`experiment.logging.log_wandb=true` is also supported.
 Rollouts remain enabled and require a compatible robosuite/MuJoCo environment.
 Set `experiment.rollout.enabled=false` for an offline training check.
 

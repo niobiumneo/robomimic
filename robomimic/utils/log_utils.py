@@ -5,14 +5,10 @@ and to tensorboard.
 import os
 import sys
 import numpy as np
-from datetime import datetime
 from contextlib import contextmanager
 import textwrap
-import time
 from tqdm import tqdm
 from termcolor import colored
-
-import robomimic
 
 # global list of warning messages can be populated with @log_warning and flushed with @flush_warnings
 WARNINGS_BUFFER = []
@@ -56,45 +52,52 @@ class DataLogger(object):
             self._tb_logger = SummaryWriter(os.path.join(log_dir, 'tb'))
 
         if log_wandb:
-            import wandb
+            try:
+                import wandb
+            except ImportError as exc:
+                if self._tb_logger is not None:
+                    self._tb_logger.close()
+                raise ImportError(
+                    "W&B logging is enabled. Install it with: python -m pip install wandb"
+                ) from exc
             import robomimic.macros as Macros
-            
-            # set up wandb api key if specified in macros
+
+            # Normal `wandb login` credentials and WANDB_* environment variables
+            # work without a private macros file. Keep legacy macros as fallbacks.
             if Macros.WANDB_API_KEY is not None:
-                os.environ["WANDB_API_KEY"] = Macros.WANDB_API_KEY
+                os.environ.setdefault("WANDB_API_KEY", Macros.WANDB_API_KEY)
+            entity = os.environ.get("WANDB_ENTITY") or Macros.WANDB_ENTITY
 
-            assert Macros.WANDB_ENTITY is not None, "WANDB_ENTITY macro is set to None." \
-                    "\nSet this macro in {base_path}/macros_private.py" \
-                    "\nIf this file does not exist, first run python {base_path}/scripts/setup_macros.py".format(base_path=robomimic.__path__[0])
-            
-            # attempt to set up wandb 10 times. If unsuccessful after these trials, don't use wandb
-            num_attempts = 10
-            for attempt in range(num_attempts):
-                try:
-                    # set up wandb
-                    self._wandb_logger = wandb
-
-                    self._wandb_logger.init(
-                        entity=Macros.WANDB_ENTITY,
-                        project=config.experiment.logging.wandb_proj_name,
-                        name=config.experiment.name,
-                        dir=log_dir,
-                        mode=("offline" if attempt == num_attempts - 1 else "online"),
-                    )
-
-                    # set up info for identifying experiment
-                    wandb_config = {k: v for (k, v) in config.meta.items() if k not in ["hp_keys", "hp_values"]}
-                    for (k, v) in zip(config.meta["hp_keys"], config.meta["hp_values"]):
-                        wandb_config[k] = v
-                    if "algo" not in wandb_config:
-                        wandb_config["algo"] = config.algo_name
-                    self._wandb_logger.config.update(wandb_config)
-
-                    break
-                except Exception as e:
-                    log_warning("wandb initialization error (attempt #{}): {}".format(attempt + 1, e))
-                    self._wandb_logger = None
-                    time.sleep(30)
+            # Save the effective training config, including the fitted force
+            # scale. Handwritten JSON templates may use null for sweep lists.
+            wandb_config = config.to_dict()
+            wandb_config["sweep_parameters"] = dict(zip(
+                config.meta.get("hp_keys") or [],
+                config.meta.get("hp_values") or [],
+            ))
+            try:
+                self._wandb_logger = wandb.init(
+                    entity=entity,
+                    project=config.experiment.logging.wandb_proj_name,
+                    name=config.experiment.name,
+                    dir=log_dir,
+                    config=wandb_config,
+                )
+            except Exception as exc:
+                if self._tb_logger is not None:
+                    self._tb_logger.close()
+                # Online logging was requested: report setup errors instead of
+                # silently switching to offline mode or training without a run.
+                raise RuntimeError(
+                    "W&B initialization failed. Run `wandb login`, check that "
+                    "WANDB_ENTITY names a team/account you can write to, and "
+                    "check network access. For an intentional offline run, "
+                    "set WANDB_MODE=offline."
+                ) from exc
+            if getattr(self._wandb_logger, "offline", False):
+                print("W&B is offline; metrics are saved locally and need `wandb sync` to appear online.")
+            elif getattr(self._wandb_logger, "url", None):
+                print("W&B run: {}".format(self._wandb_logger.url))
 
     def record(self, k, v, epoch, data_type='scalar', log_stats=False):
         """
@@ -158,6 +161,16 @@ class DataLogger(object):
         stats['min'] = np.min(self._data[k])
         stats['max'] = np.max(self._data[k])
         return stats
+
+    def flush(self, epoch):
+        """Publish all metrics for a finished epoch as one W&B history row.
+
+        record() uses an explicit step, which leaves that row open so train,
+        validation, and rollout values share the same epoch. Commit only once
+        all of them have been recorded, so plots update before the next epoch.
+        """
+        if self._wandb_logger is not None:
+            self._wandb_logger.log({}, step=epoch, commit=True)
 
     def close(self):
         """

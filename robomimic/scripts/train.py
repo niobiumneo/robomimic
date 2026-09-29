@@ -498,6 +498,7 @@ def train(config, device, resume=False):
         mem_usage = int(process.memory_info().rss / 1000000)
         data_logger.record("System/RAM Usage (MB)", mem_usage, epoch)
         print("\nEpoch {} Memory Usage: {} MB\n".format(epoch, mem_usage))
+        data_logger.flush(epoch)
 
     # terminate logging
     data_logger.close()
@@ -520,6 +521,13 @@ def main(args):
 
     if args.name is not None:
         config.experiment.name = args.name
+
+    # Enable tracking from the CLI without editing the shared task template.
+    # Authentication and entity selection use wandb login and WANDB_ENTITY.
+    if getattr(args, "wandb", False) or getattr(args, "wandb_project", None) is not None:
+        config.experiment.logging.log_wandb = True
+    if getattr(args, "wandb_project", None) is not None:
+        config.experiment.logging.wandb_proj_name = args.wandb_project
 
     # # ------------------------------------------------------------------
     # # Inject custom force modality / encoder BEFORE config.lock()
@@ -632,6 +640,18 @@ if __name__ == "__main__":
         "--resume",
         action='store_true',
         help="set this flag to resume training from latest checkpoint",
+    )
+
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        help="enable Weights & Biases logging (authenticate with wandb login)",
+    )
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default=None,
+        help="W&B project name; setting this also enables W&B logging",
     )
 
     args = parser.parse_args()

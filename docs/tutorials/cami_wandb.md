@@ -30,6 +30,14 @@ fallbacks; a private macros file is not required for W&B.
 
 ## Check the Square run
 
+For the robosuite 1.5.2 Square dataset, install the simulator versions recorded
+in this branch's `environment.yml`. Robosuite's own dependency allows newer
+MuJoCo releases, which can fail its joint-type check during environment setup:
+
+```bash
+python -m pip install -r requirements-cami-sim.txt
+```
+
 For an existing `dataset/square_image_84_with_force.hdf5`:
 
 ```bash
@@ -117,3 +125,72 @@ override the intended installation. Preserve any local changes before
 repairing that installation. If using a source checkout, install from the
 checkout root containing its `setup.py` or `pyproject.toml`, not from the inner
 Python package directory. Do not fix this by inventing a version attribute.
+
+## If `get_joint_qpos_addr` raises `AssertionError`
+
+This failure occurs while constructing the simulator, before optimization or
+W&B initialization. Robosuite 1.5.2 checks whether each robot joint is a hinge
+or slide using a tuple of MuJoCo enum values. We reproduced the assertion with
+MuJoCo 3.14.0: a valid hinge's NumPy integer fails the enum tuple membership
+test. The same check passes with MuJoCo 3.5.0. This is a binding compatibility
+problem and does not by itself indicate a bad dataset or CaMI loss.
+With robosuite 1.5.2 and NumPy 1.26.4 held fixed, changing MuJoCo from 3.14.0
+to 3.5.0 also allowed the Square/Panda environment to construct, reset, and
+complete one physics step in an isolated Python 3.12 check with rendering
+disabled. Your GPU rendering and full training still need the debug check.
+
+First record the versions in the active training environment:
+
+```bash
+python - <<'PY'
+import sys
+from importlib.metadata import version
+print("Python:", sys.executable)
+for package in ("robosuite", "mujoco", "numpy"):
+    print(package, version(package))
+PY
+```
+
+Install the simulator requirements from the repository root:
+
+```bash
+python -m pip install -r requirements-cami-sim.txt
+python -m pip check
+```
+
+These pins match the simulator versions recorded in `environment.yml`. They
+apply to this branch's robosuite 1.5.2 experiments, not every historical
+robomimic dataset. Do not remove robosuite's assertion or modify the dataset
+metadata to hide a version mismatch.
+
+Check simulator construction, reset, and a single step using the actual
+dataset metadata before rerunning training:
+
+```bash
+python - <<'PY'
+import json
+import h5py
+import numpy as np
+import robosuite
+
+with h5py.File("dataset/square_image_84_with_force.hdf5", "r") as dataset:
+    metadata = json.loads(dataset["data"].attrs["env_args"])
+
+kwargs = dict(metadata["env_kwargs"])
+# Test physics setup without needing a display or creating camera images.
+kwargs.update(has_renderer=False, has_offscreen_renderer=False, use_camera_obs=False)
+env = robosuite.make(metadata["env_name"], **kwargs)
+try:
+    env.reset()
+    env.step(np.zeros(env.action_dim))
+    print("Simulator construction, reset, and step passed.")
+finally:
+    env.close()
+PY
+```
+
+The debug training command above then checks the image-rendering path and W&B.
+If the assertion remains with the pinned versions, include the printed
+versions, `robosuite.__file__`, `mujoco.__file__`, and the new traceback when
+reporting it. Missing private macros, optional robot models, and GR1's optional
+whole-body IK warnings do not cause this Panda/OSC_POSE joint-type assertion.

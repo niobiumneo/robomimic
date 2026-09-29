@@ -120,6 +120,10 @@ See the [W&B setup guide](../docs/tutorials/cami_wandb.md) for login, account
 selection, metrics, and offline syncing. The JSON setting
 `experiment.logging.log_wandb=true` is also supported.
 Rollouts remain enabled and require a compatible robosuite/MuJoCo environment.
+For robosuite 1.5.2 datasets, run
+`python -m pip install -r requirements-cami-sim.txt` from the repository root.
+The [simulator troubleshooting guide](../docs/tutorials/cami_wandb.md#if-get_joint_qpos_addr-raises-assertionerror)
+covers the joint-type assertion during environment creation.
 Set `experiment.rollout.enabled=false` for an offline training check.
 
 The HDF5 files are ignored by Git in this directory. Keep your source data

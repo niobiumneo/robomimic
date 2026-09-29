@@ -182,6 +182,66 @@ def test_hdf5_to_optimizer_step(dataset_path, template, images):
     dataset.close_and_delete_hdf5_handle()
 
 
+@pytest.mark.parametrize("algorithm", ["bc", "bc_cami"])
+def test_rollouts_without_force_keep_success_metrics(dataset_path, capsys, algorithm):
+    """Exercise real policies with a deterministic environment lacking force.
+
+    One episode succeeds at step two and the other hits the three-step limit.
+    This checks rollout accounting, not simulator performance.
+    """
+    from unittest.mock import Mock
+    from robomimic.algo import RolloutPolicy
+    from robomimic.envs.env_base import EnvBase
+
+    config = make_config(dataset_path)
+    if algorithm == "bc":
+        raw = config.to_dict()
+        raw["algo_name"] = "bc"
+        raw["algo"].pop("cami")
+        raw["algo"]["optim_params"] = {"policy": raw["algo"]["optim_params"]["policy"]}
+        raw["train"]["dataset_keys"] = ["actions"]
+        config = config_factory("bc")
+        with config.values_unlocked():
+            config.update(raw)
+    obs_utils.initialize_obs_utils_with_config(config, verbose=False)
+    data_utils.prepare_cami_datasets(config)
+    shapes = file_utils.get_shape_metadata_from_dataset(
+        config.train.data[0], config.train.action_keys, config.all_obs_keys)
+    model = algo_factory(algorithm, config, shapes["all_shapes"], shapes["ac_dim"], torch.device("cpu"))
+
+    with h5py.File(dataset_path, "r") as dataset:
+        observation = {key: dataset[f"data/demo_0/obs/{key}"][0] for key in config.all_obs_keys}
+    assert "force" not in observation
+    state = {"episode": -1, "step": 0}
+    env = Mock(spec=EnvBase)
+    env.name = "NoForceFixture"
+    env.rollout_exceptions = ()
+
+    def reset():
+        state["episode"] += 1
+        state["step"] = 0
+        return {key: value.copy() for key, value in observation.items()}
+
+    def step(action):
+        assert action.shape == (7,)
+        assert np.isfinite(action).all()
+        state["step"] += 1
+        return {key: value.copy() for key, value in observation.items()}, 1.0, False, {}
+
+    env.reset.side_effect = reset
+    env.step.side_effect = step
+    env.is_success.side_effect = lambda: {"task": state["episode"] == 0 and state["step"] == 2}
+    logs, _ = train_utils.rollout_with_stats(
+        RolloutPolicy(model), {"square": env}, horizon=3,
+        num_episodes=2, terminate_on_success=True,
+    )
+    assert logs["square"]["Success_Rate"] == 0.5
+    assert logs["square"]["Horizon"] == 2.5
+    assert logs["square"]["Return"] == 2.5
+    assert env.step.call_count == 5
+    assert "failed to inject" not in capsys.readouterr().out
+
+
 def test_binary_labels_are_required(dataset_path):
     config = make_config(dataset_path)
     with config.values_unlocked():

@@ -101,11 +101,13 @@ You can keep `--quiet` in either mode.
 | `Train/State_CaMI_Loss` | State-query contrastive loss |
 | `Train/Traj_CaMI_Loss` | Trajectory-query contrastive loss |
 | `Train/state_*`, `Train/traj_*` | CaMI retrieval, negative weighting, and validity diagnostics |
-| `Rollout/Success_Rate/NutAssemblySquare` | Fraction of evaluation rollouts completing the task |
+| `Rollout/Success_Rate/square_image_84_with_force` | Fraction of evaluation rollouts completing the task with the dataset filename used above |
 | `Valid/*` | Held-out losses when validation is enabled |
 
 The effective training configuration, including dataset split, seed, model
 settings, and fitted continuous force scale, is saved in the run config.
+Rollout metric suffixes use the dataset filename without `.hdf5`, or its explicit
+`train.data[].key` when configured.
 In the full Square template, rollout metrics are normally generated every
 50 epochs using 50 episodes. Debug rollouts are too short to assess policy
 quality. Validation is disabled by default; enable `experiment.validate` and
@@ -215,3 +217,30 @@ If the assertion remains with the pinned versions, include the printed
 versions, `robosuite.__file__`, `mujoco.__file__`, and the new traceback when
 reporting it. Missing private macros, optional robot models, and GR1's optional
 whole-body IK warnings do not cause this Panda/OSC_POSE joint-type assertion.
+
+## Repeated `failed to inject step force` messages during rollouts
+
+Older versions of `run_rollout` attempted to inject force after every reset
+and step by unwrapping the environment and calling `_read_raw_ft_sensor()`.
+Standard robosuite `NutAssemblySquare` does not provide that custom method.
+These caught exceptions printed repeatedly during evaluation, normally first
+at epoch 50 in a full run. The obsolete injection has been removed.
+
+Continuous CaMI still reads the stored `obs/force` sequences during training
+to weight its contrastive objective. At deployment, both the current CaMI
+policy and the BC-RNN baseline use their configured visual and proprioceptive
+observations. Environment-provided observations are passed through unchanged.
+Force-based policies must obtain force through their environment wrapper.
+
+The current CaMI policy learns a contact-informed representation, but does not
+output an explicit contact-state prediction. Task success rates and contrastive
+metrics therefore do not directly measure contact-estimation accuracy. Such
+an evaluation needs a defined prediction/probe and separate contact ground
+truth; runtime diagnostic force readings may be recorded without becoming
+policy inputs.
+
+Pull the fix and restart the original training command with `--resume` and the
+same `--name`, configuration, and dataset. Resuming uses the latest saved epoch;
+an interruption during epoch-50 evaluation normally resumes from epoch 49.
+This trainer starts a new W&B run on resume. Pulling changes alone does not
+update the code in an already-running Python process.

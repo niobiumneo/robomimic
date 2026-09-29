@@ -48,7 +48,7 @@ python -m robomimic.scripts.train \
   --dataset dataset/square_image_84_with_force.hdf5 \
   --name square_cami_wandb_check \
   --wandb --wandb-project cami-contact-state \
-  --debug
+  --quiet --debug
 ```
 
 This runs two short epochs and short rollouts. The logger prints the run URL
@@ -63,13 +63,34 @@ python -m robomimic.scripts.train \
   --config robomimic/exps/templates/bc_cami_square.json \
   --dataset dataset/square_image_84_with_force.hdf5 \
   --name square_cami_continuous \
-  --wandb --wandb-project cami-contact-state
+  --wandb --wandb-project cami-contact-state \
+  --quiet
 ```
 
 `--wandb-project` also enables logging by itself. JSON users can set
 `experiment.logging.log_wandb=true` and
 `experiment.logging.wandb_proj_name="cami-contact-state"`. The CLI overrides
-these settings. `--name` becomes the displayed W&B run name.
+these settings. `--name` selects the experiment output directory; this branch
+generates the W&B display name from the algorithm, dataset, and timestamp.
+
+## Compact terminal output
+
+Add `--quiet` to keep the W&B run link, live batch progress bars, short loss
+summaries, rollout success rates, and checkpoint completion status. It omits
+the large configuration, observation, dataset, model, and per-epoch JSON dumps.
+Dataset loading progress and warnings/errors remain visible. The W&B SDK also
+uses its quiet setting, which retains warnings and errors.
+
+All scalar metrics still go to W&B/TensorBoard when enabled, and the effective
+configuration is still saved in `config.json`. Quiet mode only changes terminal
+verbosity. It does not change training, evaluation, or checkpoint contents.
+
+Remove `--debug` for the full configuration. The Square template runs 2,000
+epochs with 500 training batches per epoch, and evaluates 50 rollouts every
+50 epochs with a 400-step horizon. With `--debug`, those become 2 epochs,
+3 batches per epoch, and 2 rollouts per epoch with a 10-step horizon. Starting
+without `--debug` creates a fresh full run unless you explicitly use `--resume`.
+You can keep `--quiet` in either mode.
 
 ## What appears in W&B
 

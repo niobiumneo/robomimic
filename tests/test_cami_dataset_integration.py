@@ -195,7 +195,8 @@ def test_binary_labels_are_required(dataset_path):
         data_utils.prepare_cami_datasets(config)
 
 
-def test_training_entrypoint_saves_resolved_config_and_checkpoint(dataset_path, tmp_path):
+@pytest.mark.parametrize("quiet", [False, True])
+def test_training_entrypoint_saves_resolved_config_and_checkpoint(dataset_path, tmp_path, capsys, quiet):
     from robomimic.scripts.train import train
 
     config = make_config(dataset_path)
@@ -208,7 +209,10 @@ def test_training_entrypoint_saves_resolved_config_and_checkpoint(dataset_path, 
         config.train.hdf5_validation_filter_key = "valid"
         config.experiment.logging.terminal_output_to_txt = False
     config.lock()
-    train(config, device=torch.device("cpu"))
+    if quiet:
+        from robomimic.utils.log_utils import log_warning
+        log_warning("deferred setup warning remains visible", print_now=False)
+    train(config, device=torch.device("cpu"), quiet=quiet)
     saved = list((tmp_path / "results").rglob("config.json"))
     assert len(saved) == 1
     stored = json.loads(saved[0].read_text())
@@ -216,9 +220,22 @@ def test_training_entrypoint_saves_resolved_config_and_checkpoint(dataset_path, 
     assert stored["algo"]["cami"]["continuous_contact"]["force_scale"] == pytest.approx(expected)
     assert stored["train"]["data"][0]["path"] == str(dataset_path)
     assert (saved[0].parent / "last.pth").is_file()
+    output = capsys.readouterr().out
+    if quiet:
+        assert "New Training Run with Config" not in output
+        assert "Model Summary" not in output
+        assert '"BC_Action_Loss":' not in output
+        assert "Train 1/1 | loss=" in output
+        assert "Valid 1/1 | loss=" in output
+        assert "Epoch 1/1 complete | checkpoint saved" in output
+        assert "deferred setup warning remains visible" in output
+    else:
+        assert "New Training Run with Config" in output
+        assert "Model Summary" in output
 
 
-def test_cli_reports_invalid_dataset_with_nonzero_exit(dataset_path, tmp_path):
+@pytest.mark.parametrize("quiet", [False, True])
+def test_cli_reports_invalid_dataset_with_nonzero_exit(dataset_path, tmp_path, quiet):
     config = make_config(dataset_path)
     with config.values_unlocked():
         config.train.data = [{"path": str(tmp_path / "missing.hdf5")}]
@@ -226,7 +243,8 @@ def test_cli_reports_invalid_dataset_with_nonzero_exit(dataset_path, tmp_path):
     path = tmp_path / "invalid.json"
     path.write_text(json.dumps(config))
     result = subprocess.run(
-        [sys.executable, "-m", "robomimic.scripts.train", "--config", str(path)],
+        [sys.executable, "-m", "robomimic.scripts.train", "--config", str(path)]
+        + (["--quiet"] if quiet else []),
         cwd=TEMPLATES.parents[2], capture_output=True, text=True,
     )
     assert result.returncode != 0

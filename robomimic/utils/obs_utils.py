@@ -130,7 +130,7 @@ def initialize_obs_modality_mapping_from_dict(modality_mapping):
         OBS_KEYS_TO_MODALITIES.update({k: mod for k in keys})
 
 
-def initialize_obs_utils_with_obs_specs(obs_modality_specs):
+def initialize_obs_utils_with_obs_specs(obs_modality_specs, verbose=True):
     """
     This function should be called before using any observation key-specific
     functions in this file, in order to make sure that all utility
@@ -169,6 +169,8 @@ def initialize_obs_utils_with_obs_specs(obs_modality_specs):
         obs_modality_specs (dict or list): A nested dictionary (see docstring above for an example)
             or a list of nested dictionaries. Accepting a list as input makes it convenient for
             situations where multiple modules may each have their own modality spec.
+
+        verbose (bool): whether to print the registered modality mappings
     """
     global OBS_KEYS_TO_MODALITIES, OBS_MODALITIES_TO_KEYS
 
@@ -203,9 +205,10 @@ def initialize_obs_utils_with_obs_specs(obs_modality_specs):
     # remove duplicate entries and store in global mapping
     OBS_MODALITIES_TO_KEYS = { obs_modality : list(set(obs_modality_mapping[obs_modality])) for obs_modality in obs_modality_mapping }
 
-    print("\n============= Initialized Observation Utils with Obs Spec =============\n")
-    for obs_modality, obs_keys in OBS_MODALITIES_TO_KEYS.items():
-        print("using obs modality: {} with keys: {}".format(obs_modality, obs_keys))
+    if verbose:
+        print("\n============= Initialized Observation Utils with Obs Spec =============\n")
+        for obs_modality, obs_keys in OBS_MODALITIES_TO_KEYS.items():
+            print("using obs modality: {} with keys: {}".format(obs_modality, obs_keys))
 
 
 def initialize_default_obs_encoder(obs_encoder_config):
@@ -221,13 +224,15 @@ def initialize_default_obs_encoder(obs_encoder_config):
     DEFAULT_ENCODER_KWARGS = obs_encoder_kwargs_from_config(obs_encoder_config)
 
 
-def initialize_obs_utils_with_config(config):
+def initialize_obs_utils_with_config(config, verbose=True):
     """
     Utility function to parse config and call @initialize_obs_utils_with_obs_specs and
     @initialize_default_obs_encoder_kwargs with the correct arguments.
 
     Args:
         config (BaseConfig instance): config object
+
+        verbose (bool): whether to print the registered modality mappings
     """
     if config.algo_name == "hbc":
         obs_modality_specs = [
@@ -245,7 +250,7 @@ def initialize_obs_utils_with_config(config):
     else:
         obs_modality_specs = [config.observation.modalities]
         obs_encoder_config = config.observation.encoder
-    initialize_obs_utils_with_obs_specs(obs_modality_specs=obs_modality_specs)
+    initialize_obs_utils_with_obs_specs(obs_modality_specs=obs_modality_specs, verbose=verbose)
     initialize_default_obs_encoder(obs_encoder_config=obs_encoder_config)
 
 

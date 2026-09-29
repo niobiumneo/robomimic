@@ -37,11 +37,12 @@ class DataLogger(object):
     """
     Logging class to log metrics to tensorboard and/or retrieve running statistics about logged data.
     """
-    def __init__(self, log_dir, config, log_tb=True, log_wandb=False):
+    def __init__(self, log_dir, config, log_tb=True, log_wandb=False, quiet=False):
         """
         Args:
             log_dir (str): base path to store logs
             log_tb (bool): whether to use tensorboard logging
+            quiet (bool): reduce W&B informational output while retaining warnings and errors
         """
         self._tb_logger = None
         self._wandb_logger = None
@@ -76,12 +77,16 @@ class DataLogger(object):
                 config.meta.get("hp_values") or [],
             ))
             try:
+                # W&B's quiet setting keeps warnings/errors, unlike silent=True.
+                # Print our own run URL below so it is always easy to find.
+                init_kwargs = {"settings": wandb.Settings(quiet=True)} if quiet else {}
                 self._wandb_logger = wandb.init(
                     entity=entity,
                     project=config.experiment.logging.wandb_proj_name,
                     name=config.experiment.name,
                     dir=log_dir,
                     config=wandb_config,
+                    **init_kwargs,
                 )
             except Exception as exc:
                 if self._tb_logger is not None:
@@ -97,7 +102,7 @@ class DataLogger(object):
             if getattr(self._wandb_logger, "offline", False):
                 print("W&B is offline; metrics are saved locally and need `wandb sync` to appear online.")
             elif getattr(self._wandb_logger, "url", None):
-                print("W&B run: {}".format(self._wandb_logger.url))
+                print("W&B run: {}".format(self._wandb_logger.url), flush=True)
 
     def record(self, k, v, epoch, data_type='scalar', log_stats=False):
         """

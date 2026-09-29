@@ -618,7 +618,7 @@ def should_save_from_rollout_logs(
     )
 
 
-def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=None, obs_normalization_stats=None, action_normalization_stats=None):
+def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=None, obs_normalization_stats=None, action_normalization_stats=None, verbose=True):
     """
     Save model to a torch pth file.
 
@@ -632,6 +632,8 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=No
         shape_meta (dict): shape metdata for this training run
 
         ckpt_path (str): writes model checkpoint to this path
+
+        verbose (bool): whether to print the saved checkpoint path
 
         variable_state (dict): internal variable state in main train loop, used for restoring training process
             from ckpt
@@ -664,10 +666,11 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=No
         action_normalization_stats = deepcopy(action_normalization_stats)
         params["action_normalization_stats"] = TensorUtils.to_list(action_normalization_stats)
     torch.save(params, ckpt_path)
-    print("save checkpoint to {}".format(ckpt_path))
+    if verbose:
+        print("save checkpoint to {}".format(ckpt_path))
 
 
-def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_normalization_stats=None):
+def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_normalization_stats=None, progress_desc=None):
     """
     Run an epoch of training or validation.
 
@@ -678,6 +681,8 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_nor
             to the model
 
         epoch (int): epoch number
+
+        progress_desc (str or None): optional label for the live batch progress bar
 
         validate (bool): whether this is a training epoch or validation epoch. This tells the model
             whether to do gradient steps or purely do forward passes.
@@ -705,7 +710,7 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_nor
     start_time = time.time()
 
     data_loader_iter = iter(data_loader)
-    for _ in LogUtils.custom_tqdm(range(num_steps)):
+    for _ in LogUtils.custom_tqdm(range(num_steps), desc=progress_desc):
 
         # load next batch from data loader
         try:

@@ -41,7 +41,7 @@ def fake_wandb(monkeypatch):
         calls.append(kwargs)
         return run
 
-    module = SimpleNamespace(init=init)
+    module = SimpleNamespace(init=init, Settings=lambda **kwargs: SimpleNamespace(**kwargs))
     monkeypatch.setitem(sys.modules, "wandb", module)
     monkeypatch.setattr(macros, "WANDB_ENTITY", None)
     monkeypatch.setattr(macros, "WANDB_API_KEY", None)
@@ -103,6 +103,19 @@ def test_offline_run_is_identified(tmp_path, fake_wandb, capsys):
     logger.close()
 
 
+def test_quiet_mode_keeps_run_link_and_metrics(tmp_path, fake_wandb, capsys):
+    logger = DataLogger(str(tmp_path), square_config(), log_tb=False, log_wandb=True, quiet=True)
+    assert fake_wandb.calls[0]["settings"].quiet is True
+    assert "W&B run: https://wandb.ai/test/cami/runs/example" in capsys.readouterr().out
+    logger.record("Train/state_valid_anchor_fraction", 0.75, epoch=1)
+    logger.flush(1)
+    assert fake_wandb.history == [
+        ({"Train/state_valid_anchor_fraction": 0.75}, 1, {}),
+        ({}, 1, {"commit": True}),
+    ]
+    logger.close()
+
+
 @pytest.mark.parametrize("enabled, project, expected", [
     (False, None, False), (True, None, True), (False, "cami-tests", True),
 ])
@@ -121,14 +134,15 @@ def test_training_cli_wandb_overrides(monkeypatch, enabled, project, expected):
     assert captured[0].experiment.logging.wandb_proj_name == (project or "cami")
 
 
-def test_real_sdk_offline_metrics(tmp_path, monkeypatch):
+@pytest.mark.parametrize("quiet", [False, True])
+def test_real_sdk_offline_metrics(tmp_path, monkeypatch, quiet):
     """Exercise the real SDK while ensuring it cannot create an online run."""
     wandb = pytest.importorskip("wandb")
     monkeypatch.setenv("WANDB_MODE", "offline")
     monkeypatch.setenv("WANDB_ENTITY", "robomimic-test")
     monkeypatch.setenv("WANDB_SILENT", "true")
     monkeypatch.setattr(macros, "WANDB_API_KEY", None)
-    logger = DataLogger(str(tmp_path), square_config(), log_tb=False, log_wandb=True)
+    logger = DataLogger(str(tmp_path), square_config(), log_tb=False, log_wandb=True, quiet=quiet)
     try:
         assert logger._wandb_logger.offline
         logger.record("Train/BC_Action_Loss", 0.2, epoch=1)
@@ -143,3 +157,22 @@ def test_real_sdk_offline_metrics(tmp_path, monkeypatch):
     finally:
         logger.close()
     assert list(tmp_path.glob("wandb/offline-run-*/run-*.wandb"))
+
+
+@pytest.mark.parametrize("debug", [False, True])
+@pytest.mark.parametrize("quiet", [False, True])
+def test_quiet_and_debug_are_independent(monkeypatch, debug, quiet):
+    from robomimic.scripts import train as training
+
+    captured = []
+    monkeypatch.setattr(training.TorchUtils, "get_torch_device", lambda **kwargs: "cpu")
+    monkeypatch.setattr(training, "train", lambda config, **kwargs: captured.append((config, kwargs)))
+    training.main(SimpleNamespace(
+        config=str(TEMPLATE), dataset=None, name="quiet-cli-test", debug=debug,
+        resume=False, wandb=False, wandb_project=None, quiet=quiet,
+    ))
+    config, kwargs = captured[0]
+    assert kwargs["quiet"] is quiet
+    assert config.train.num_epochs == (2 if debug else 2000)
+    assert config.experiment.epoch_every_n_steps == (3 if debug else 500)
+    assert config.experiment.rollout.horizon == (10 if debug else 400)

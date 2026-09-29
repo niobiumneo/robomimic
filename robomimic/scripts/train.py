@@ -13,6 +13,8 @@ Args:
     dataset (str): if provided, override the dataset path defined in the config
 
     debug (bool): set this flag to run a quick training run for debugging purposes    
+
+    quiet (bool): show progress and compact metrics instead of configuration and model dumps
 """
 
 import argparse
@@ -59,7 +61,22 @@ def compute_force_stats(hdf5_path):
     return mean, std
 
 
-def train(config, device, resume=False):
+def _print_epoch_summary(phase, epoch, total_epochs, metrics):
+    """Keep the key losses readable while the complete metrics go to W&B/TensorBoard."""
+    parts = ["{} {}/{}".format(phase, epoch, total_epochs)]
+    for key, label in (
+        ("Loss", "loss"), ("BC_Action_Loss", "BC"),
+        ("State_CaMI_Loss", "state"), ("Traj_CaMI_Loss", "traj"),
+    ):
+        if key in metrics:
+            parts.append("{}={:.4g}".format(label, metrics[key]))
+    if "Time_Epoch" in metrics:
+        # run_epoch reports timing in minutes.
+        parts.append("{:.1f}s".format(60 * metrics["Time_Epoch"]))
+    print(" | ".join(parts), flush=True)
+
+
+def train(config, device, resume=False, quiet=False):
     """
     Train a model using the algorithm.
     """
@@ -75,9 +92,13 @@ def train(config, device, resume=False):
 
     torch.set_num_threads(2)
 
-    print("\n============= New Training Run with Config =============")
-    print(config)
-    print("")
+    if quiet:
+        print("Preparing {} | device={} | epochs={}".format(
+            config.algo_name, device, config.train.num_epochs), flush=True)
+    else:
+        print("\n============= New Training Run with Config =============")
+        print(config)
+        print("")
     log_dir, ckpt_dir, video_dir, time_dir = TrainUtils.get_exp_dir(config, resume=resume)
 
     # path for latest model and backup (to support @resume functionality)
@@ -99,7 +120,7 @@ def train(config, device, resume=False):
     # ForceModality.set_normalization_stats(force_mean, force_std, clip=5.0)
 
     # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
-    ObsUtils.initialize_obs_utils_with_config(config)
+    ObsUtils.initialize_obs_utils_with_config(config, verbose=not quiet)
 
     # extract the metadata and shape metadata across all datasets
     env_meta_list = []
@@ -114,7 +135,8 @@ def train(config, device, resume=False):
             raise Exception("Dataset at provided path {} not found!".format(dataset_path))
 
         # load basic metadata from training file
-        print("\n============= Loaded Environment Metadata =============")
+        if not quiet:
+            print("\n============= Loaded Environment Metadata =============")
         env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=dataset_path)
 
         # Populate language instruction for env in env_meta, but only if the policy is
@@ -134,7 +156,7 @@ def train(config, device, resume=False):
             dataset_config=dataset_cfg,
             action_keys=config.train.action_keys,
             all_obs_keys=config.all_obs_keys,
-            verbose=True
+            verbose=not quiet
         )
         shape_meta_list.append(shape_meta)
 
@@ -182,7 +204,8 @@ def train(config, device, resume=False):
                 env = create_env(env_name)
                 env_key = os.path.splitext(os.path.basename(dataset_cfg["path"]))[0] if not dataset_cfg.get("key", None) else dataset_cfg["key"]
                 envs[env_key] = env
-                print(env)
+                if not quiet:
+                    print(env)
 
     print("")
 
@@ -190,13 +213,14 @@ def train(config, device, resume=False):
     trainset, validset = TrainUtils.load_data_for_training(
         config, obs_keys=shape_meta["all_obs_keys"])
     train_sampler = trainset.get_dataset_sampler()
-    print("\n============= Training Dataset =============")
-    print(trainset)
-    print("")
-    if validset is not None:
-        print("\n============= Validation Dataset =============")
-        print(validset)
+    if not quiet:
+        print("\n============= Training Dataset =============")
+        print(trainset)
         print("")
+        if validset is not None:
+            print("\n============= Validation Dataset =============")
+            print(validset)
+            print("")
 
     # maybe retreve statistics for normalizing observations
     obs_normalization_stats = None
@@ -270,6 +294,7 @@ def train(config, device, resume=False):
         config,
         log_tb=config.experiment.logging.log_tb,
         log_wandb=config.experiment.logging.log_wandb,
+        quiet=quiet,
     )
     model = algo_factory(
         algo_name=config.algo_name,
@@ -306,16 +331,20 @@ def train(config, device, resume=False):
     with open(os.path.join(log_dir, '..', 'config.json'), 'w') as outfile:
         json.dump(config, outfile, indent=4)
 
-    print("\n============= Model Summary =============")
-    print(model)  # print model summary
-    print("")
+    if not quiet:
+        print("\n============= Model Summary =============")
+        print(model)  # print model summary
+        print("")
 
     # print all warnings before training begins
-    print("*" * 50)
-    print("Warnings generated by robomimic have been duplicated here (from above) for convenience. Please check them carefully.")
+    if not quiet:
+        print("*" * 50)
+        print("Warnings generated by robomimic have been duplicated here (from above) for convenience. Please check them carefully.")
+    # Flush deferred warnings even in quiet mode so setup issues stay visible.
     flush_warnings()
-    print("*" * 50)
-    print("")
+    if not quiet:
+        print("*" * 50)
+        print("")
 
     # main training loop
     best_valid_loss = None
@@ -342,6 +371,7 @@ def train(config, device, resume=False):
             epoch=epoch,
             num_steps=train_num_steps,
             obs_normalization_stats=obs_normalization_stats,
+            progress_desc="Train {}/{}".format(epoch, config.train.num_epochs) if quiet else None,
         )
         model.on_epoch_end(epoch)
 
@@ -362,8 +392,11 @@ def train(config, device, resume=False):
             last_ckpt_time = time.time()
             ckpt_reason = "time"
 
-        print("Train Epoch {}".format(epoch))
-        print(json.dumps(step_log, sort_keys=True, indent=4))
+        if quiet:
+            _print_epoch_summary("Train", epoch, config.train.num_epochs, step_log)
+        else:
+            print("Train Epoch {}".format(epoch))
+            print(json.dumps(step_log, sort_keys=True, indent=4))
         for k, v in step_log.items():
             if k.startswith("Time_"):
                 data_logger.record("Timing_Stats/Train_{}".format(k[5:]), v, epoch)
@@ -380,6 +413,7 @@ def train(config, device, resume=False):
                     validate=True,
                     num_steps=valid_num_steps,
                     obs_normalization_stats=obs_normalization_stats,
+                    progress_desc="Valid {}/{}".format(epoch, config.train.num_epochs) if quiet else None,
                 )
             for k, v in step_log.items():
                 if k.startswith("Time_"):
@@ -387,8 +421,11 @@ def train(config, device, resume=False):
                 else:
                     data_logger.record("Valid/{}".format(k), v, epoch)
 
-            print("Validation Epoch {}".format(epoch))
-            print(json.dumps(step_log, sort_keys=True, indent=4))
+            if quiet:
+                _print_epoch_summary("Valid", epoch, config.train.num_epochs, step_log)
+            else:
+                print("Validation Epoch {}".format(epoch))
+                print(json.dumps(step_log, sort_keys=True, indent=4))
 
             # save checkpoint if achieve new best validation loss
             valid_check = "Loss" in step_log
@@ -435,9 +472,14 @@ def train(config, device, resume=False):
                     else:
                         data_logger.record("Rollout/{}/{}".format(k, env_name), v, epoch, log_stats=True)
 
-                print("\nEpoch {} Rollouts took {}s (avg) with results:".format(epoch, rollout_logs["time"]))
-                print('Env: {}'.format(env_name))
-                print(json.dumps(rollout_logs, sort_keys=True, indent=4))
+                if quiet:
+                    print("Rollout {}/{} | {} | success={:.1%} | return={:.4g}".format(
+                        epoch, config.train.num_epochs, env_name,
+                        rollout_logs["Success_Rate"], rollout_logs["Return"]), flush=True)
+                else:
+                    print("\nEpoch {} Rollouts took {}s (avg) with results:".format(epoch, rollout_logs["time"]))
+                    print('Env: {}'.format(env_name))
+                    print(json.dumps(rollout_logs, sort_keys=True, indent=4))
 
             # checkpoint and video saving logic
             updated_stats = TrainUtils.should_save_from_rollout_logs(
@@ -474,10 +516,12 @@ def train(config, device, resume=False):
                 ckpt_path=os.path.join(ckpt_dir, epoch_ckpt_name + ".pth"),
                 obs_normalization_stats=obs_normalization_stats,
                 action_normalization_stats=action_normalization_stats,
+                verbose=not quiet,
             )
 
         # always save latest model for resume functionality
-        print("\nsaving latest model at {}...\n".format(latest_model_path))
+        if not quiet:
+            print("\nsaving latest model at {}...\n".format(latest_model_path))
         TrainUtils.save_model(
             model=model,
             config=config,
@@ -487,18 +531,24 @@ def train(config, device, resume=False):
             ckpt_path=latest_model_path,
             obs_normalization_stats=obs_normalization_stats,
             action_normalization_stats=action_normalization_stats,
+            verbose=not quiet,
         )
 
         # keep a backup model in case last.pth is malformed (e.g. job died last time during saving)
         shutil.copyfile(latest_model_path, latest_model_backup_path)
-        print("\nsaved backup of latest model at {}\n".format(latest_model_backup_path))
+        if not quiet:
+            print("\nsaved backup of latest model at {}\n".format(latest_model_backup_path))
 
         # Finally, log memory usage in MB
         process = psutil.Process(os.getpid())
         mem_usage = int(process.memory_info().rss / 1000000)
         data_logger.record("System/RAM Usage (MB)", mem_usage, epoch)
-        print("\nEpoch {} Memory Usage: {} MB\n".format(epoch, mem_usage))
         data_logger.flush(epoch)
+        if quiet:
+            print("Epoch {}/{} complete | checkpoint saved | RAM={} MB".format(
+                epoch, config.train.num_epochs, mem_usage), flush=True)
+        else:
+            print("\nEpoch {} Memory Usage: {} MB\n".format(epoch, mem_usage))
 
     # terminate logging
     data_logger.close()
@@ -506,6 +556,7 @@ def train(config, device, resume=False):
 
 def main(args):
 
+    quiet = getattr(args, "quiet", False)
     if args.config is not None:
         ext_cfg = json.load(open(args.config, 'r'))
         config = config_factory(ext_cfg["algo_name"])
@@ -575,19 +626,23 @@ def main(args):
     # lock config to prevent further modifications and ensure missing keys raise errors
     config.lock()
 
-    print("\n[DEBUG] observation modalities:")
-    print(config.observation.modalities)
-
-    print("\n[DEBUG] observation encoders:")
-    print(config.observation.encoder)
+    if not quiet:
+        print("\n[DEBUG] observation modalities:")
+        print(config.observation.modalities)
+        print("\n[DEBUG] observation encoders:")
+        print(config.observation.encoder)
 
     # catch error during training and print it
     res_str = "finished run successfully!"
     try:
-        train(config, device=device, resume=args.resume)
+        train(config, device=device, resume=args.resume, quiet=quiet)
     except Exception as e:
-        res_str = "run failed with error:\n{}\n\n{}".format(e, traceback.format_exc())
-        print(res_str)
+        if quiet:
+            # The re-raised exception supplies the full traceback once.
+            print("Training failed: {}".format(e), file=sys.stderr, flush=True)
+        else:
+            res_str = "run failed with error:\n{}\n\n{}".format(e, traceback.format_exc())
+            print(res_str)
         # Dataset validation and training failures must fail shell jobs too.
         raise
     print(res_str)
@@ -652,6 +707,11 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="W&B project name; setting this also enables W&B logging",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="show progress, compact losses, and the W&B link; omit config/model dumps",
     )
 
     args = parser.parse_args()

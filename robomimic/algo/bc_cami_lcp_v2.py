@@ -230,6 +230,9 @@ class BC_CaMI_CaNCE(_PolicyLatentMixin, BC_RNN):
     """
 
     def _create_networks(self):
+        force_key = self.algo_config.cami.lcp.force_dataset_key.split("/")[-1]
+        if {force_key, "force", "force_rawbias", "force_obsbias", "contact_label"}.intersection(self.obs_shapes):
+            raise ValueError("Load force and contact labels through train.dataset_keys, outside policy observations")
         super(BC_CaMI_CaNCE, self)._create_networks()
 
         lcp_cfg = self.algo_config.cami.lcp
@@ -281,15 +284,20 @@ class BC_CaMI_CaNCE(_PolicyLatentMixin, BC_RNN):
         input_batch["goal_obs"] = batch.get("goal_obs", None)
         input_batch["actions"] = batch["actions"]
 
-        if "force" in batch["obs"]:
+        # The stored wrench is privileged supervision, not a policy modality.
+        key = self.algo_config.cami.lcp.force_dataset_key
+        if key in batch:
+            force = batch[key]
+        elif "force" in batch["obs"]:
             force = batch["obs"]["force"]
         elif "force" in batch:
             force = batch["force"]
         else:
             raise KeyError(
-                "BC_CaMI_CaNCE requires raw force/torque in batch['obs']['force'] "
-                "(shape [B, T, D_f])."
+                f"BC_CaMI_CaNCE requires stored wrench at batch[{key!r}], shape [B,T,D_f]"
             )
+        if force.ndim != 3 or force.shape[:2] != batch["actions"].shape[:2] or force.shape[-1] != self.algo_config.cami.lcp.force_dim:
+            raise ValueError("Force must align with actions and match lcp.force_dim")
         input_batch["force"] = force
         T = force.shape[1]
 
@@ -329,8 +337,7 @@ class BC_CaMI_CaNCE(_PolicyLatentMixin, BC_RNN):
 
         input_batch["obs"] = {
             k: batch["obs"][k]
-            for k in batch["obs"]
-            if k not in ["force", "contact_label"]
+            for k in self.obs_shapes
         }
 
         if not hasattr(self, "_debug_printed_batch_stats"):
@@ -624,7 +631,8 @@ class BC_CaMI_CaNCE(_PolicyLatentMixin, BC_RNN):
         log["NCE_Loss"] = losses["nce_loss"].item()
         log["Pen_Loss"] = losses["pen_loss"].item()
         log["Mag_Loss"] = losses["mag_loss"].item()
-        log["Negative_Mode"] = self._negative_mode
+        # Epoch aggregation averages scalar metrics; the mode name is in config.
+        log["Negative_Mode_Regime"] = float(self._negative_mode == "regime")
 
         if "l2_loss" in losses:
             log["L2_Loss"] = losses["l2_loss"].item()

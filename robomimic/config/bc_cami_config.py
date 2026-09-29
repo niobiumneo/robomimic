@@ -78,8 +78,9 @@ class BCCaMIConfig(BCConfig):
         self.algo.cami.continuous_contact.enabled = False
         self.algo.cami.continuous_contact.force_dataset_key = "obs/force"
 
-        # Placeholder scale in force units; fit on training demos only.
-        self.algo.cami.continuous_contact.force_scale = 50.0
+        # Null fits std(||F_xyz||) + 1e-6 from selected training demos only.
+        # A positive number explicitly preserves a previously fitted scale.
+        self.algo.cami.continuous_contact.force_scale = None
 
         # Huber transition after force normalization.
         self.algo.cami.continuous_contact.huber_delta = 0.1

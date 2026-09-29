@@ -28,6 +28,9 @@ class BCCaMILCPConfig(BCConfig):
         # loaded sequence window (obs_encoding[:, 1, :]), not a separate
         # "next_obs" batch entry.
         self.train.hdf5_load_next_obs = False
+        self.train.seq_length = 11
+        # Every LCP pair must contain two recorded timesteps.
+        self.train.pad_seq_length = False
 
     def observation_config(self):
         super(BCCaMILCPConfig, self).observation_config()
@@ -42,6 +45,7 @@ class BCCaMILCPConfig(BCConfig):
 
     def algo_config(self):
         super(BCCaMILCPConfig, self).algo_config()
+        self.algo.rnn.enabled = True
 
         # Optimizer entries for the LCP branch's two new trainable modules.
         # BC_CaMI_LCP._train_step requires exactly these three optimizer
@@ -61,6 +65,7 @@ class BCCaMILCPConfig(BCConfig):
 
         self.algo.cami.lcp.num_contacts = 1       # p, number of contact points
         self.algo.cami.lcp.force_dim = 6          # raw wrench dimensionality [fx,fy,fz,tx,ty,tz]
+        self.algo.cami.lcp.force_dataset_key = "obs/force"
 
         self.algo.cami.lcp.gap_hidden_dims = (256, 256)   # E_v MLP hidden layers
         self.algo.cami.lcp.impulse_hidden_dims = (128,)   # E_f MLP hidden layers

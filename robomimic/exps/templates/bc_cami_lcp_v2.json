@@ -6,7 +6,7 @@
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": true,
-            "log_wandb": true,
+            "log_wandb": false,
             "wandb_proj_name": "cami"
         },
         "save": {
@@ -38,26 +38,28 @@
         "ckpt_path": null
     },
     "train": {
-        "data": null,
-        "output_dir": "../../bc_rnn_cami_cance_regime_50_percent_tool_hang",
+        "data": [
+            {
+                "path": "dataset/tool_hang/ph/cami_with_force.hdf5"
+            }
+        ],
+        "output_dir": "../trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
         "hdf5_use_swmr": true,
         "hdf5_load_next_obs": false,
         "hdf5_normalize_obs": false,
-        "hdf5_filter_key": null,
+        "hdf5_filter_key": "train",
         "hdf5_validation_filter_key": null,
         "seq_length": 11,
-        "pad_seq_length": true,
+        "pad_seq_length": false,
         "frame_stack": 1,
         "pad_frame_stack": true,
         "dataset_keys": [
             "actions",
-            "rewards",
-            "dones",
-            "contact_label",
-            "force"
+            "obs/force",
+            "contact_label"
         ],
         "action_keys": [
             "actions"
@@ -72,7 +74,7 @@
         "batch_size": 16,
         "num_epochs": 2000,
         "seed": 1,
-        "max_grad_norm": 1.0
+        "max_grad_norm": 1
     },
     "algo": {
         "optim_params": {
@@ -85,7 +87,7 @@
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 0.0
+                    "L2": 0
                 }
             },
             "gap_encoder": {
@@ -97,7 +99,7 @@
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 0.0
+                    "L2": 0
                 }
             },
             "impulse_encoder": {
@@ -109,14 +111,14 @@
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 0.0
+                    "L2": 0
                 }
             }
         },
         "loss": {
-            "l2_weight": 1.0,
-            "l1_weight": 0.0,
-            "cos_weight": 0.0
+            "l2_weight": 1,
+            "l1_weight": 0,
+            "cos_weight": 0
         },
         "actor_layer_dims": [
             1024,
@@ -141,7 +143,7 @@
             "enabled": false,
             "latent_dim": 14,
             "latent_clip": null,
-            "kl_weight": 1.0,
+            "kl_weight": 1,
             "decoder": {
                 "is_conditioned": true,
                 "reconstruction_sum_across_elements": false
@@ -155,7 +157,7 @@
                 "use_categorical": false,
                 "categorical_dim": 10,
                 "categorical_gumbel_softmax_hard": false,
-                "categorical_init_temp": 1.0,
+                "categorical_init_temp": 1,
                 "categorical_temp_anneal_step": 0.001,
                 "categorical_min_temp": 0.3
             },
@@ -202,14 +204,20 @@
             "enabled": true,
             "lcp": {
                 "loss_weight": 0.01,
-                "beta": 1.0,
-                "w_pen": 100.0,
-                "w_mag": 1.0,
+                "beta": 1,
+                "w_pen": 100,
+                "w_mag": 1,
                 "negative_mode": "regime",
                 "num_contacts": 1,
                 "force_dim": 6,
-                "gap_hidden_dims": [256, 256],
-                "impulse_hidden_dims": [128]
+                "gap_hidden_dims": [
+                    256,
+                    256
+                ],
+                "impulse_hidden_dims": [
+                    128
+                ],
+                "force_dataset_key": "obs/force"
             }
         }
     },
@@ -221,7 +229,7 @@
                     "robot0_eef_quat",
                     "robot0_gripper_qpos",
                     "object"
-                    ],
+                ],
                 "rgb": [
                     "sideview_image",
                     "robot0_eye_in_hand_image"
@@ -243,16 +251,17 @@
                 "obs_randomizer_class": null,
                 "obs_randomizer_kwargs": {}
             },
-        "rgb": {
-            "core_class": "VisualCore",
-            "core_kwargs": {},
-            "obs_randomizer_class": "CropRandomizer",
-            "obs_randomizer_kwargs": {
-                "crop_height": 216,
-                "crop_width": 216,
-                "num_crops": 1,
-                "pos_enc": false
-            }},
+            "rgb": {
+                "core_class": "VisualCore",
+                "core_kwargs": {},
+                "obs_randomizer_class": "CropRandomizer",
+                "obs_randomizer_kwargs": {
+                    "crop_height": 216,
+                    "crop_width": 216,
+                    "num_crops": 1,
+                    "pos_enc": false
+                }
+            },
             "depth": {
                 "core_class": "VisualCore",
                 "core_kwargs": {},

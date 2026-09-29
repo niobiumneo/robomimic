@@ -150,7 +150,8 @@ class BC_CaMI(BC_RNN):
                 result["force_sequence"] = wrench[:, 1:horizon + 1, :3].detach()
                 result["force_valid"] = batch["pad_mask"][:, 1:horizon + 1, 0].bool()
             else:
-                label = batch.get("contact_label", batch["obs"].get("contact_label"))
+                key = self.algo_config.cami.get("contact_label_key", "contact_label")
+                label = batch.get(key, batch["obs"].get(key.split("/")[-1]))
                 if label is None:
                     raise KeyError("Binary CaMI requires contact_label")
                 if label.ndim > 1:

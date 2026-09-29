@@ -69,6 +69,11 @@ The robomimic framework also makes reproducing the results from different benchm
 
 ## CaMI dataset regeneration
 
+If you already have an augmented HDF5, see the
+[dataset placement and training guide](dataset/README.md) for the expected
+fields and task-specific configs. Training validates stored supervision before
+creating a model and fits continuous CaMI's force scale on the training split.
+
 Use [`rebuild_cami_dataset.py`](rebuild_cami_dataset.py) to replay Square and
 Tool Hang demonstrations with synchronized wrist force/torque and future
 contact labels. The script can download the public raw demonstrations and

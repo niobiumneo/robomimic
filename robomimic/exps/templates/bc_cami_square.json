@@ -1,7 +1,7 @@
 {
-    "algo_name": "bc_cami_lcp",
+    "algo_name": "bc_cami",
     "experiment": {
-        "name": "cami_lcp_50_percent_tool_hang",
+        "name": "cami_huber_square",
         "validate": false,
         "logging": {
             "terminal_output_to_txt": true,
@@ -29,7 +29,7 @@
         "rollout": {
             "enabled": true,
             "n": 50,
-            "horizon": 700,
+            "horizon": 400,
             "rate": 50,
             "warmstart": 0,
             "terminate_on_success": true
@@ -40,7 +40,7 @@
     "train": {
         "data": [
             {
-                "path": "dataset/tool_hang/ph/cami_with_force.hdf5"
+                "path": "dataset/square/ph/cami_with_force.hdf5"
             }
         ],
         "output_dir": "../trained_models",
@@ -53,7 +53,7 @@
         "hdf5_filter_key": "train",
         "hdf5_validation_filter_key": null,
         "seq_length": 11,
-        "pad_seq_length": false,
+        "pad_seq_length": true,
         "frame_stack": 1,
         "pad_frame_stack": true,
         "dataset_keys": [
@@ -89,7 +89,7 @@
                     "L2": 0
                 }
             },
-            "gap_encoder": {
+            "state_encoder": {
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
@@ -101,7 +101,19 @@
                     "L2": 0
                 }
             },
-            "impulse_encoder": {
+            "snippet_encoder": {
+                "optimizer_type": "adam",
+                "learning_rate": {
+                    "initial": 0.0001,
+                    "decay_factor": 0.1,
+                    "epoch_schedule": [],
+                    "scheduler_type": "multistep"
+                },
+                "regularization": {
+                    "L2": 0
+                }
+            },
+            "key_proj": {
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
@@ -201,20 +213,47 @@
         },
         "cami": {
             "enabled": true,
-            "lcp": {
-                "loss_weight": 0.01,
-                "w_comp": 0.01,
-                "w_pen": 100,
-                "num_contacts": 1,
-                "force_dim": 6,
-                "gap_hidden_dims": [
-                    256,
-                    256
-                ],
-                "impulse_hidden_dims": [
-                    128
-                ],
-                "force_dataset_key": "obs/force"
+            "loss_weight": 0.01,
+            "temperature": 0.07,
+            "contact_threshold": 10,
+            "loss_type": "paired_infonce",
+            "snippet_horizon": 10,
+            "num_negatives": 1,
+            "opposite_contact_negatives_only": true,
+            "use_momentum_target": true,
+            "target_tau": 0.005,
+            "image_feature_dim": 128,
+            "force_feature_dim": 128,
+            "fused_feature_dim": 256,
+            "contrastive_dim": 128,
+            "policy_latent_dim": 1024,
+            "anchor_fusion_layers": [
+                256,
+                256
+            ],
+            "query_proj_layers": [
+                128
+            ],
+            "key_proj_layers": [
+                128
+            ],
+            "snippet_encoder_type": "lstm",
+            "snippet_hidden_dim": 256,
+            "snippet_num_layers": 1,
+            "image_obs_key": [
+                "agentview_image",
+                "robot0_eye_in_hand_image"
+            ],
+            "force_obs_key": "force",
+            "contact_label_key": "contact_label",
+            "normalize_embeddings": true,
+            "continuous_contact": {
+                "enabled": true,
+                "force_dataset_key": "obs/force",
+                "force_scale": null,
+                "huber_delta": 0.1,
+                "contact_temperature": 0.05,
+                "gamma": 1
             }
         }
     },
@@ -228,7 +267,7 @@
                     "object"
                 ],
                 "rgb": [
-                    "sideview_image",
+                    "agentview_image",
                     "robot0_eye_in_hand_image"
                 ],
                 "depth": [],
@@ -253,8 +292,8 @@
                 "core_kwargs": {},
                 "obs_randomizer_class": "CropRandomizer",
                 "obs_randomizer_kwargs": {
-                    "crop_height": 216,
-                    "crop_width": 216,
+                    "crop_height": 76,
+                    "crop_width": 76,
                     "num_crops": 1,
                     "pos_enc": false
                 }

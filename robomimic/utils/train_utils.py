@@ -105,6 +105,10 @@ def load_data_for_training(config, obs_keys):
         valid_dataset (SequenceDataset instance): valid dataset object (only if using validation)
     """
 
+    # Also cover callers that use the loader directly, outside scripts/train.py.
+    from robomimic.utils.cami_dataset_utils import prepare_cami_datasets
+    prepare_cami_datasets(config)
+
     # config can contain an attribute to filter on
     train_filter_by_attribute = config.train.hdf5_filter_key
     valid_filter_by_attribute = config.train.hdf5_validation_filter_key

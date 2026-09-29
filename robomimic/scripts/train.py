@@ -64,6 +64,11 @@ def train(config, device, resume=False):
     Train a model using the algorithm.
     """
 
+    # Resolve dataset/ paths and validate stored CaMI supervision before
+    # opening experiment directories, initializing renderers, or allocating models.
+    from robomimic.utils.cami_dataset_utils import prepare_cami_datasets
+    prepare_cami_datasets(config)
+
     # first set seeds
     np.random.seed(config.train.seed)
     torch.manual_seed(config.train.seed)
@@ -574,6 +579,9 @@ def main(args):
         train(config, device=device, resume=args.resume)
     except Exception as e:
         res_str = "run failed with error:\n{}\n\n{}".format(e, traceback.format_exc())
+        print(res_str)
+        # Dataset validation and training failures must fail shell jobs too.
+        raise
     print(res_str)
 
 

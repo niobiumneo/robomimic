@@ -6,7 +6,7 @@
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": true,
-            "log_wandb": true,
+            "log_wandb": false,
             "wandb_proj_name": "cami"
         },
         "save": {
@@ -40,17 +40,17 @@
     "train": {
         "data": [
             {
-                "path": "/path/to/augmented_tool_hang.hdf5"
+                "path": "dataset/tool_hang/ph/cami_with_force.hdf5"
             }
         ],
-        "output_dir": "../../bc_rnn_cami_huber_tool_hang",
+        "output_dir": "../trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
         "hdf5_use_swmr": true,
         "hdf5_load_next_obs": false,
         "hdf5_normalize_obs": false,
-        "hdf5_filter_key": null,
+        "hdf5_filter_key": "train",
         "hdf5_validation_filter_key": null,
         "seq_length": 11,
         "pad_seq_length": true,
@@ -58,8 +58,6 @@
         "pad_frame_stack": true,
         "dataset_keys": [
             "actions",
-            "rewards",
-            "dones",
             "obs/force"
         ],
         "action_keys": [
@@ -252,7 +250,7 @@
             "continuous_contact": {
                 "enabled": true,
                 "force_dataset_key": "obs/force",
-                "force_scale": 50,
+                "force_scale": null,
                 "huber_delta": 0.1,
                 "contact_temperature": 0.05,
                 "gamma": 1

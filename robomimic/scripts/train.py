@@ -601,8 +601,30 @@ def main(args):
     #     config.observation.encoder.force.obs_randomizer_kwargs = {}
 
 
-    # get torch device
+        # Select the device for the model and training batches.
     device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
+
+    # Report the selected device.
+    print(f"\nTraining device: {device}", flush=True)
+
+    if device.type == "cuda":
+        gpu_index = (
+            device.index
+            if device.index is not None
+            else torch.cuda.current_device()
+        )
+        gpu = torch.cuda.get_device_properties(gpu_index)
+
+        print(f"GPU name: {gpu.name}", flush=True)
+        print(f"CUDA device index: {gpu_index}", flush=True)
+        print(
+            f"GPU total memory: {gpu.total_memory / 1024**3:.1f} GiB",
+            flush=True,
+        )
+        print(f"PyTorch CUDA version: {torch.version.cuda}", flush=True)
+    else:
+        print("Training is using CPU.", flush=True)
+
 
     # maybe modify config for debugging purposes
     if args.debug:

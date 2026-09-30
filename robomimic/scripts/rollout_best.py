@@ -12,6 +12,7 @@ import argparse
 import json
 import random
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import torch
 
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.torch_utils as TorchUtils
+from robomimic.utils.trial_metrics import describe, seed_environment
 
 
 def select_checkpoint(run_dir, metric_key=None):
@@ -70,7 +72,7 @@ def select_checkpoint(run_dir, metric_key=None):
     return path, {"metric_key": key, "training_success_rate": rate, "epoch": epoch}
 
 
-def collect_episode(policy, env, horizon, camera_names, video_skip):
+def collect_episode(policy, env, horizon, camera_names, video_skip, terminate_on_success=True):
     """Collect aligned pre-action states, post-action states, and video frames.
 
     Reset recurrent policy state for each independent trial. Success uses the
@@ -84,6 +86,7 @@ def collect_episode(policy, env, horizon, camera_names, video_skip):
     trajectory = {k: [] for k in ("states", "next_states", "actions", "rewards", "dones")}
     frames = []
     success = False
+    success_metrics = {}
     error = None
     goal = env.get_goal() if getattr(policy.policy.global_config, "use_goals", False) else None
     try:
@@ -96,7 +99,10 @@ def collect_episode(policy, env, horizon, camera_names, video_skip):
                                ("next_states", next_state["states"]),
                                ("actions", action), ("rewards", reward), ("dones", done)):
                 trajectory[key].append(np.array(value, copy=True))
-            success = success or bool(env.is_success()["task"])
+            current = env.is_success()
+            for key, value in current.items():
+                success_metrics[key] = success_metrics.get(key, False) or bool(value)
+            success = success_metrics["task"]
             # Always include the success / terminal frame even when skipped.
             if step % video_skip == 0 or success or done or step == horizon - 1:
                 frames.append(np.concatenate([
@@ -104,7 +110,7 @@ def collect_episode(policy, env, horizon, camera_names, video_skip):
                     for camera in camera_names
                 ], axis=1))
             state = next_state
-            if done or success:
+            if done or (success and terminate_on_success):
                 break
     except env.rollout_exceptions as exc:
         # Record simulator errors separately; they remain in the denominator.
@@ -113,6 +119,8 @@ def collect_episode(policy, env, horizon, camera_names, video_skip):
     stats = {"Return": float(np.sum(trajectory["rewards"])),
              "Horizon": len(trajectory["actions"]), "Success_Rate": float(success),
              "error": error}
+    stats.update({key + "_Success_Rate": float(value)
+                  for key, value in success_metrics.items() if key != "task"})
     return stats, {k: np.asarray(v) for k, v in trajectory.items()}, initial_state, frames
 
 
@@ -181,8 +189,14 @@ def run(args):
                 random.seed(seed)
                 np.random.seed(seed)
                 torch.manual_seed(seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(seed)
+                seed_environment(env, seed)
+                started = time.time()
                 stats, trajectory, initial, frames = collect_episode(
-                    policy, env, horizon, args.camera_names, args.video_skip)
+                    policy, env, horizon, args.camera_names, args.video_skip,
+                    terminate_on_success=getattr(config.experiment.rollout, "terminate_on_success", True))
+                stats["time"] = time.time() - started
                 name = "demo_{}".format(index)
                 save_trajectory(data, name, trajectory, initial, stats, seed)
                 data.attrs.modify("total", int(data.attrs["total"]) + stats["Horizon"])
@@ -204,6 +218,12 @@ def run(args):
                                num_success=len(masks["successful"]),
                                num_errors=len(masks["errors"]),
                                success_rate=len(masks["successful"]) / len(records))
+                metric_keys = {key for record in records for key in record
+                               if key in ("Return", "Horizon", "Success_Rate", "time")
+                               or key.endswith("_Success_Rate")}
+                summary["metrics"] = {key: describe([record.get(key) for record in records])["mean"]
+                                      for key in sorted(metric_keys)}
+                summary["metrics"]["Simulator_Error_Rate"] = len(masks["errors"]) / len(records)
                 (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
                 print("Trial {}/{} | {} | steps={} | success so far={:.1%}".format(
                     index + 1, args.n_rollouts, status, stats["Horizon"],
@@ -222,6 +242,7 @@ def run(args):
         summary["num_success"], len(records), summary["success_rate"],
         summary["num_errors"]), flush=True)
     print("Videos, all trajectories, and summary saved in {}".format(output), flush=True)
+    return summary
 
 
 def main():

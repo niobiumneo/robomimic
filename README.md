@@ -77,6 +77,10 @@ creating a model and fits continuous CaMI's force scale on the training split.
 For online loss curves and rollout results, see the
 [CaMI W&B setup guide](docs/tutorials/cami_wandb.md).
 
+For ten independent training seeds, best-checkpoint trajectory exports, and
+mean, sample SD, and SE in W&B, see the
+[CaMI trial runner guide](docs/tutorials/cami_trials.md).
+
 Use [`rebuild_cami_dataset.py`](rebuild_cami_dataset.py) to replay Square and
 Tool Hang demonstrations with synchronized wrist force/torque and future
 contact labels. The script can download the public raw demonstrations and

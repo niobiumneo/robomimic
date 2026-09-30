@@ -4,6 +4,7 @@ and to tensorboard.
 """
 import os
 import sys
+import json
 import numpy as np
 from contextlib import contextmanager
 import textwrap
@@ -47,6 +48,8 @@ class DataLogger(object):
         self._tb_logger = None
         self._wandb_logger = None
         self._data = dict() # store all the scalar data logged so far
+        from robomimic.utils.trial_metrics import ScalarJournal
+        self._journal = ScalarJournal(log_dir)
 
         if log_tb:
             from tensorboardX import SummaryWriter
@@ -56,6 +59,7 @@ class DataLogger(object):
             try:
                 import wandb
             except ImportError as exc:
+                self._journal.close()
                 if self._tb_logger is not None:
                     self._tb_logger.close()
                 raise ImportError(
@@ -76,6 +80,11 @@ class DataLogger(object):
                 config.meta.get("hp_keys") or [],
                 config.meta.get("hp_values") or [],
             ))
+            # Flat fields make trial filtering and grouping easy in the W&B UI.
+            wandb_config["trial_seed"] = config.train.seed
+            wandb_config["trial_group"] = os.environ.get("WANDB_RUN_GROUP")
+            if os.environ.get("CAMI_TRIAL_INDEX"):
+                wandb_config["trial_index"] = int(os.environ["CAMI_TRIAL_INDEX"])
             try:
                 # W&B's quiet setting keeps warnings/errors, unlike silent=True.
                 # Print our own run URL below so it is always easy to find.
@@ -84,11 +93,20 @@ class DataLogger(object):
                     entity=entity,
                     project=config.experiment.logging.wandb_proj_name,
                     name=config.experiment.name,
+                    group=os.environ.get("WANDB_RUN_GROUP"),
+                    job_type=os.environ.get("WANDB_JOB_TYPE"),
                     dir=log_dir,
                     config=wandb_config,
                     **init_kwargs,
                 )
+                self._wandb_logger.define_metric("epoch")
+                self._wandb_logger.define_metric("*", step_metric="epoch")
+                with open(os.path.join(log_dir, "wandb_run.json"), "w") as stream:
+                    json.dump({"id": self._wandb_logger.id,
+                               "group": os.environ.get("WANDB_RUN_GROUP"),
+                               "name": config.experiment.name}, stream)
             except Exception as exc:
+                self._journal.close()
                 if self._tb_logger is not None:
                     self._tb_logger.close()
                 # Online logging was requested: report setup errors instead of
@@ -118,11 +136,16 @@ class DataLogger(object):
         assert data_type in ['scalar', 'image']
 
         if data_type == 'scalar':
+            self._journal.record(k, v, epoch)
             # maybe update internal cache if logging stats for this key
             if log_stats or k in self._data: # any key that we're logging or previously logged
                 if k not in self._data:
                     self._data[k] = []
                 self._data[k].append(v)
+
+            if log_stats:
+                for stat_k, stat_v in self.get_stats(k).items():
+                    self._journal.record("{}/{}".format(k, stat_k), stat_v, epoch)
 
         # maybe log to tensorboard
         if self._tb_logger is not None:
@@ -174,13 +197,15 @@ class DataLogger(object):
         validation, and rollout values share the same epoch. Commit only once
         all of them have been recorded, so plots update before the next epoch.
         """
+        self._journal.flush(epoch)
         if self._wandb_logger is not None:
-            self._wandb_logger.log({}, step=epoch, commit=True)
+            self._wandb_logger.log({"epoch": epoch}, step=epoch, commit=True)
 
     def close(self):
         """
         Run before terminating to make sure all logs are flushed
         """
+        self._journal.close()
         if self._tb_logger is not None:
             self._tb_logger.close()
 

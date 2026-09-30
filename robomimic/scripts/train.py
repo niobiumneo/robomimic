@@ -19,6 +19,7 @@ Args:
 
 import argparse
 import json
+import random
 import numpy as np
 import time
 import os
@@ -88,7 +89,10 @@ def train(config, device, resume=False, quiet=False):
 
     # first set seeds
     np.random.seed(config.train.seed)
+    random.seed(config.train.seed)
     torch.manual_seed(config.train.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(config.train.seed)
 
     torch.set_num_threads(2)
 
@@ -199,6 +203,8 @@ def train(config, device, resume=False, quiet=False):
                     use_image_obs=shape_meta["use_images"] or shape_meta["use_depths"],
                 )
                 env = EnvUtils.create_env_from_metadata(**env_kwargs)
+                from robomimic.utils.trial_metrics import seed_environment
+                seed_environment(env, config.train.seed)
                 return env
             for env_name in env_names:
                 env = create_env(env_name)
@@ -282,12 +288,8 @@ def train(config, device, resume=False, quiet=False):
 
 
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dataset_tag = os.path.splitext(os.path.basename(config.train.data[0]["path"]))[0]
-
-    with config.values_unlocked():
-        config.experiment.name = f"{config.algo_name}_{dataset_tag}_{timestamp}"
-        
+    # Keep the configured/CLI experiment name: it already identifies the output
+    # folder, and must also identify the W&B run and resume checkpoints.
     # setup for a new training run
     data_logger = DataLogger(
         log_dir,
@@ -440,7 +442,9 @@ def train(config, device, resume=False, quiet=False):
 
         # do rollouts at fixed rate or if it's time to save a new ckpt
         video_paths = None
-        rollout_check = (epoch % config.experiment.rollout.rate == 0) or (should_save_ckpt and ckpt_reason == "time")
+        rollout_check = ((epoch % config.experiment.rollout.rate == 0)
+                         or epoch == config.train.num_epochs
+                         or (should_save_ckpt and ckpt_reason == "time"))
         if config.experiment.rollout.enabled and (epoch > config.experiment.rollout.warmstart) and rollout_check:
             # wrap model as a RolloutPolicy to prepare for rollouts
             rollout_model = RolloutPolicy(

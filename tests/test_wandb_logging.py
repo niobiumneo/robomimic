@@ -32,8 +32,9 @@ def fake_wandb(monkeypatch):
     calls = []
     history = []
     run = SimpleNamespace(
-        offline=False, url="https://wandb.ai/test/cami/runs/example", finished=False,
+        id="example", offline=False, url="https://wandb.ai/test/cami/runs/example", finished=False,
     )
+    run.define_metric = lambda *args, **kwargs: None
     run.log = lambda values, step, **kwargs: history.append((values, step, kwargs))
     run.finish = lambda: setattr(run, "finished", True)
 
@@ -66,7 +67,7 @@ def test_null_sweep_metadata_and_effective_config(tmp_path, fake_wandb):
         ({"Train/State_CaMI_Loss": 0.7}, 1, {}),
     ]
     logger.flush(epoch=1)
-    assert fake_wandb.history[-1] == ({}, 1, {"commit": True})
+    assert fake_wandb.history[-1] == ({"epoch": 1}, 1, {"commit": True})
     logger.close()
     assert fake_wandb.run.finished
 
@@ -111,7 +112,7 @@ def test_quiet_mode_keeps_run_link_and_metrics(tmp_path, fake_wandb, capsys):
     logger.flush(1)
     assert fake_wandb.history == [
         ({"Train/state_valid_anchor_fraction": 0.75}, 1, {}),
-        ({}, 1, {"commit": True}),
+        ({"epoch": 1}, 1, {"commit": True}),
     ]
     logger.close()
 
@@ -123,7 +124,7 @@ def test_training_cli_wandb_overrides(monkeypatch, enabled, project, expected):
     from robomimic.scripts import train as training
 
     captured = []
-    monkeypatch.setattr(training.TorchUtils, "get_torch_device", lambda **kwargs: "cpu")
+    monkeypatch.setattr(training.TorchUtils, "get_torch_device", lambda **kwargs: SimpleNamespace(type="cpu"))
     monkeypatch.setattr(training, "train", lambda config, **kwargs: captured.append(config))
     args = SimpleNamespace(
         config=str(TEMPLATE), dataset=None, name="wandb-cli-test", debug=False,
@@ -165,7 +166,7 @@ def test_quiet_and_debug_are_independent(monkeypatch, debug, quiet):
     from robomimic.scripts import train as training
 
     captured = []
-    monkeypatch.setattr(training.TorchUtils, "get_torch_device", lambda **kwargs: "cpu")
+    monkeypatch.setattr(training.TorchUtils, "get_torch_device", lambda **kwargs: SimpleNamespace(type="cpu"))
     monkeypatch.setattr(training, "train", lambda config, **kwargs: captured.append((config, kwargs)))
     training.main(SimpleNamespace(
         config=str(TEMPLATE), dataset=None, name="quiet-cli-test", debug=debug,

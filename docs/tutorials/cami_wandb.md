@@ -102,6 +102,8 @@ You can keep `--quiet` in either mode.
 | `Train/Traj_CaMI_Loss` | Trajectory-query contrastive loss |
 | `Train/state_*`, `Train/traj_*` | CaMI retrieval, negative weighting, and validity diagnostics |
 | `Rollout/Success_Rate/square_image_84_with_force` | Fraction of evaluation rollouts completing the task with the dataset filename used above |
+| `Rollout/Return/square_image_84_with_force` | Mean sum of rewards over the evaluation trials |
+| `Rollout/Horizon/square_image_84_with_force` | Mean number of steps before success, termination, or timeout |
 | `Valid/*` | Held-out losses when validation is enabled |
 
 The effective training configuration, including dataset split, seed, model
@@ -244,3 +246,79 @@ same `--name`, configuration, and dataset. Resuming uses the latest saved epoch;
 an interruption during epoch-50 evaluation normally resumes from epoch 49.
 This trainer starts a new W&B run on resume. Pulling changes alone does not
 update the code in an already-running Python process.
+
+## Rollout plots, best checkpoint, and successful videos
+
+Plot `Rollout/Success_Rate/square_image_84_with_force` against W&B's Step
+(the training epoch). A value of 0.8 means 40 of 50 evaluation trials succeeded.
+Use the plain metric: its `/mean`, `/max`, `/min`, and `/std` variants summarize
+the history of evaluation checkpoints, not the current 50 trials. Set chart
+smoothing to zero when locating the actual highest evaluation point.
+`Rollout/Return/...` and `Rollout/Horizon/...` provide reward and duration
+context; short episodes can reflect either early success or termination, so
+interpret horizon alongside success rate.
+
+The Square template saves numbered checkpoints every 50 epochs, including
+epochs with failures. New best success rates add a `_success_<rate>` suffix.
+`last.pth` and `last_bak.pth` are latest weights for resuming. These are policy
+parameters, not individual episode paths. Checkpoint `best_success_rate`
+metadata is a historical maximum and does not identify the quality of the
+current weights. The template has `render_video=false`, and training does
+not write individual episode state/action trajectories.
+
+The helper below selects the highest success-tagged checkpoint from the
+latest timestamped run in the experiment folder. Pass a timestamped run
+directory to evaluate an older run. It works with BC-RNN and CaMI checkpoints.
+
+```bash
+export MUJOCO_GL=egl
+python -m robomimic.scripts.rollout_best \
+  --run-dir trained_models/square_cami_continuous \
+  --n-rollouts 50 \
+  --camera-names agentview robot0_eye_in_hand
+```
+
+For the BC-RNN baseline, use `trained_models/square_bc_rnn` instead.
+Use `--checkpoint /path/to/model.pth` to choose weights explicitly, or
+`--metric-key square_image_84_with_force` if multiple dataset metrics occur
+in checkpoint filenames. Automatic selection requires at least one completed
+evaluation with best-success checkpoint saving enabled; it will not silently
+substitute `last.pth`. A checkpoint with multiple environment metadata entries
+requires the existing evaluation tools and is rejected by this helper.
+
+Each execution creates a new folder under the run's `successful_rollouts/`:
+
+- `successful_trial_...mp4`: one video per successful trial. Add
+  `--keep-failures` to also save `failed_trial_...mp4` and `errors_trial_...mp4`.
+- `rollouts.hdf5`: all trials, with actions, rewards, dones, simulator states
+  before and after each action, model XML, episode metadata, and success flags.
+  Masks `successful`, `failed`, and `errors` select the outcomes.
+- `summary.json`: checkpoint path, original training evaluation score,
+  trial seeds, outcomes, return, length, video filenames, and the new success
+  rate across every requested trial. Simulator errors count in its denominator.
+
+These are fresh trials from the selected policy. Old training trials cannot
+be recovered exactly from weights alone. The default seeds start at 10000;
+pass a different `--seed` for a different set. Success videos are selected
+examples, while the summary reports the whole evaluation budget. The helper
+does not upload its outputs or overwrite the training metrics in W&B.
+
+The horizon defaults to the checkpoint setting (400 for full Square runs).
+Videos default to 20 fps with every step recorded, matching Square's 20 Hz.
+If using `--video-skip 5`, use `--fps 4` for approximately natural speed.
+Simulator paths can be replayed without rerunning the policy:
+
+```bash
+python -m robomimic.scripts.playback_dataset \
+  --dataset /path/to/successful_rollouts/RUN/rollouts.hdf5 \
+  --filter_key successful \
+  --render_image_names agentview robot0_eye_in_hand \
+  --video_path /path/to/replayed_successes.mp4 --video_skip 1
+```
+
+State playback uses the stored model and states to avoid drift from action
+playback. The original MP4 includes the final post-action success frame;
+the standard playback script renders the stored pre-action states. The
+helper also preserves final post-action states in `next_states`. Observations
+and force/contact supervision are not exported by this utility, so its output
+is for trajectory review, not a replacement CaMI training dataset.

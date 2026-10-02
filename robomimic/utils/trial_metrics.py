@@ -79,6 +79,42 @@ def describe(values):
             "std": std, "se": std / math.sqrt(n) if std is not None else None, "n": n}
 
 
+# Dataset keys can contain underscores. Parse return and success tags in
+# order so a return tag never absorbs a preceding success tag.
+_TAGS = re.compile(
+    r"_(?P<key>.+?)_(?P<kind>success|return)_(?P<rate>-?\d+(?:\.\d+)?)"
+    r"(?=_|$)"
+)
+
+
+def parse_checkpoint_name(path):
+    """Epoch and (dataset key, success rate) tags in a trainer-named checkpoint.
+
+    The trainer names best-success files model_epoch_<N>_<key>_success_<rate>.pth.
+    Any other file name gives (None, []).
+    """
+    stem = Path(path).stem
+    epoch_match = re.match(r"model_epoch_(\d+)", stem)
+    if epoch_match is None:
+        return None, []
+    suffix = re.sub(r"^_best_validation_-?\d+(?:\.\d+)?(?:e[+-]?\d+)?", "", stem[epoch_match.end():])
+    tags = [(match["key"], float(match["rate"])) for match in _TAGS.finditer(suffix)
+            if match["kind"] == "success"]
+    return int(epoch_match[1]), tags
+
+
+def describe_checkpoint(path, metric_key=None):
+    """Selection record for a checkpoint chosen by hand; whatever its name does not say is None."""
+    epoch, tags = parse_checkpoint_name(path)
+    if metric_key is not None:
+        tags = [tag for tag in tags if tag[0] == metric_key]
+    keys = {key for key, _ in tags}
+    if len(keys) != 1:  # no success tag, or several datasets and no --metric-key to choose one
+        return {"metric_key": metric_key, "training_success_rate": None, "epoch": epoch}
+    return {"metric_key": keys.pop(), "training_success_rate": max(rate for _, rate in tags),
+            "epoch": epoch}
+
+
 def select_checkpoint(run_dir, metric_key=None):
     """Find the best success-tagged checkpoint in one timestamped run.
 
@@ -97,23 +133,12 @@ def select_checkpoint(run_dir, metric_key=None):
             raise ValueError("No timestamped training run found in {}".format(run_dir))
         run_dir = runs[-1]
 
-    # Dataset keys can contain underscores. Parse return and success tags in
-    # order so a return tag never absorbs a preceding success tag.
-    pattern = re.compile(
-        r"_(?P<key>.+?)_(?P<kind>success|return)_(?P<rate>-?\d+(?:\.\d+)?)"
-        r"(?=_|$)"
-    )
     candidates = []
     for path in sorted((run_dir / "models").glob("model_epoch_*.pth")):
-        epoch_match = re.match(r"model_epoch_(\d+)", path.stem)
-        if epoch_match is None:
+        epoch, tags = parse_checkpoint_name(path)
+        if epoch is None:
             continue
-        suffix = path.stem[epoch_match.end():]
-        suffix = re.sub(r"^_best_validation_-?\d+(?:\.\d+)?(?:e[+-]?\d+)?", "", suffix)
-        for match in pattern.finditer(suffix):
-            if match["kind"] == "success":
-                candidates.append((match["key"], float(match["rate"]),
-                                   int(epoch_match[1]), path))
+        candidates.extend((key, rate, epoch, path) for key, rate in tags)
     keys = sorted({key for key, _, _, _ in candidates})
     if metric_key is None and len(keys) > 1:
         raise ValueError("Multiple rollout metrics found; use --metric-key: {}".format(keys))
@@ -135,17 +160,30 @@ def summarize(history, epochs, selection, trials):
     the spread measures evaluation variability of this one model, not training
     variability. Individual per-metric extrema are deliberately not mixed into
     BestCheckpoint.
+
+    A checkpoint trained elsewhere may have no metrics journal (history None) or
+    an unknown epoch (selection["epoch"] None). Then the curves and the Final and
+    BestCheckpoint values that need them are left out; the evaluation statistics
+    are always reported.
     """
-    if max(history) != epochs:
-        raise ValueError("Training history ends at epoch {}, not {}".format(max(history), epochs))
-    best_epoch = int(selection["epoch"])
-    if best_epoch not in history:
-        raise ValueError("Selected checkpoint epoch {} has no metrics".format(best_epoch))
+    best_epoch = selection.get("epoch")
+    best_epoch = None if best_epoch is None else int(best_epoch)
+    if history is not None:
+        if max(history) != epochs:
+            raise ValueError("Training history ends at epoch {}, not {}".format(max(history), epochs))
+        if best_epoch is not None and best_epoch not in history:
+            raise ValueError("Selected checkpoint epoch {} has no metrics".format(best_epoch))
     if not trials:
         raise ValueError("At least one evaluation trial is required")
     summaries = defaultdict(list)
-    summaries["Selection/Epoch"].append(best_epoch)
-    for scope, metrics in (("Final", history[epochs]), ("BestCheckpoint", history[best_epoch])):
+    if best_epoch is not None:
+        summaries["Selection/Epoch"].append(best_epoch)
+    scopes = []
+    if history is not None:
+        scopes.append(("Final", history[epochs]))
+        if best_epoch is not None:
+            scopes.append(("BestCheckpoint", history[best_epoch]))
+    for scope, metrics in scopes:
         for key, value in metrics.items():
             summaries[scope + "/" + key].append(value)
     per_trial = []
@@ -160,9 +198,10 @@ def summarize(history, epochs, selection, trials):
         "n_trials": len(trials),
         "rollouts_per_trial": int(trials[0]["evaluation"]["n_rollouts_completed"]),
         "epochs": epochs, "std_ddof": 1, "selection": selection,
-        "curves": [{"epoch": epoch, "metric": key, "value": value}
-                   for epoch, metrics in sorted(history.items())
-                   for key, value in sorted(metrics.items())],
+        "curves": [] if history is None else [
+            {"epoch": epoch, "metric": key, "value": value}
+            for epoch, metrics in sorted(history.items())
+            for key, value in sorted(metrics.items())],
         "summary": {key: describe(values) for key, values in sorted(summaries.items())},
         "trials": per_trial,
     }

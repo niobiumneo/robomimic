@@ -4,6 +4,13 @@ Run from the repository root, using the same Python environment as train.py:
     python -m robomimic.scripts.train_trials --config CONFIG --dataset DATASET \
         --n-trials 10 --epochs 2000 --group square-cami-c --wandb-project cami
 
+Or skip training and evaluate a model you already have, either one checkpoint
+or the best-success checkpoint of an existing run:
+    python -m robomimic.scripts.train_trials --checkpoint PATH/model_epoch_1000_..._success_0.9.pth \
+        --n-trials 10 --group square-cami-c-best --wandb-project cami
+    python -m robomimic.scripts.train_trials --run-dir PATH/to/run \
+        --n-trials 10 --group square-cami-c-best --wandb-project cami
+
 This follows run_trained_agent_multi_eval.py: one trained model (a single
 training seed), whose best checkpoint is evaluated --n-trials times with
 --rollouts-per-trial episodes each. Every trial's trajectories and success
@@ -24,8 +31,8 @@ from datetime import datetime
 from pathlib import Path
 
 from robomimic.utils.trial_metrics import (
-    ROLLOUT_FIELDS, TRIAL_FIELDS, read_history, rollout_rows, select_checkpoint,
-    summarize, trial_rows)
+    ROLLOUT_FIELDS, TRIAL_FIELDS, describe_checkpoint, read_history, rollout_rows,
+    select_checkpoint, summarize, trial_rows)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +55,8 @@ def write_csv(path, fieldnames, rows):
 
 
 def make_plan(args):
+    if args.checkpoint or args.run_dir:
+        return make_evaluation_plan(args)
     config = json.loads(Path(args.config).expanduser().read_text(encoding="utf-8"))
     if args.dataset:
         dataset = str(Path(args.dataset).expanduser().resolve(strict=True))
@@ -90,10 +99,45 @@ def make_plan(args):
                 "video_skip": args.video_skip, "fps": args.fps or 20 / args.video_skip,
                 "keep_failures": args.keep_failures, "metric_key": args.metric_key,
                 "entity": args.wandb_entity}
+    # Only a horizon override is recorded, so plans made without one keep the
+    # fingerprint they had before the option existed and can still be resumed.
+    if args.horizon is not None:
+        settings["horizon"] = args.horizon
     # A changed execution mode is allowed on resume; the scientific settings stay fixed.
     fingerprint = copy.deepcopy(settings)
     fingerprint["config"]["experiment"]["logging"].pop("log_wandb", None)
     signature = hashlib.sha256(json.dumps(fingerprint, sort_keys=True).encode()).hexdigest()
+    return settings, signature
+
+
+def make_evaluation_plan(args):
+    """Plan for a model that already exists: no training config, seed or epoch count."""
+    if args.checkpoint:
+        path = Path(args.checkpoint).expanduser()
+        if path.is_dir():
+            raise ValueError("--checkpoint must be a .pth file; use --run-dir to pick the "
+                             "best checkpoint of a run")
+        if not path.is_file():
+            raise FileNotFoundError("Checkpoint not found: {}".format(path))
+        path = path.resolve()
+        selection = describe_checkpoint(path, args.metric_key)
+    else:
+        path, selection = select_checkpoint(args.run_dir, args.metric_key)
+    if args.wandb_mode != "disabled" and not args.wandb_project:
+        raise ValueError("Set --wandb-project (or --wandb-mode disabled) to evaluate an existing model")
+    horizon = args.horizon
+    if args.debug:
+        args.rollouts_per_trial = 2
+        horizon = 10 if horizon is None else horizon
+    settings = {"mode": "evaluate", "checkpoint": str(path), "selection": selection,
+                "n_trials": args.n_trials, "rollouts_per_trial": args.rollouts_per_trial,
+                "eval_seed": args.eval_seed, "camera_names": args.camera_names,
+                "video_skip": args.video_skip, "fps": args.fps or 20 / args.video_skip,
+                "keep_failures": args.keep_failures, "metric_key": args.metric_key,
+                "entity": args.wandb_entity}
+    if horizon is not None:
+        settings["horizon"] = horizon
+    signature = hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()
     return settings, signature
 
 
@@ -123,21 +167,54 @@ def load_manifest(group_dir):
     return manifest
 
 
+def external_training(settings):
+    """The 'training' entry for a model trained elsewhere: nothing to run.
+
+    A run made by this repository's trainer keeps its exact per-epoch scalars in
+    logs/metrics.jsonl next to models/. When that journal is there and covers the
+    checkpoint's epoch, the report includes the curves too.
+    """
+    checkpoint, selection = Path(settings["checkpoint"]), settings["selection"]
+    training = {"name": "existing-checkpoint", "seed": None, "status": "external",
+                "training_complete": True, "wandb_id": None, "history": None,
+                "checkpoint": dict(selection, path=str(checkpoint))}
+    # The trainer writes models/<file> one level below the run folder and last.pth in it.
+    # Any other file name or place may be a copy of some other run, so it gets no journal.
+    if checkpoint.parent.name == "models":
+        run_dir = checkpoint.parent.parent
+    elif checkpoint.name in ("last.pth", "last_bak.pth") and (checkpoint.parent / "models").is_dir():
+        run_dir = checkpoint.parent
+    else:
+        run_dir = None
+    journal = None if run_dir is None else run_dir / "logs" / "metrics.jsonl"
+    if journal is not None and journal.is_file():
+        try:
+            history = read_history(journal)
+        except ValueError:
+            history = None
+        if history is not None and (selection["epoch"] is None or selection["epoch"] in history):
+            training["history"] = str(journal)
+    return training
+
+
 def new_manifest(args, group_dir, settings, signature):
     group_dir.mkdir(parents=True, exist_ok=False)
-    config = copy.deepcopy(settings["config"])
-    name = args.group + "-train"
-    config["train"].update(seed=settings["seed"], num_epochs=settings["epochs"],
-                           output_dir=str(group_dir / "training"))
-    config["experiment"]["name"] = name
-    config_path = group_dir / "config.json"
-    write_json(config_path, config)
+    if settings.get("mode") == "evaluate":
+        training = external_training(settings)
+    else:
+        config = copy.deepcopy(settings["config"])
+        name = args.group + "-train"
+        config["train"].update(seed=settings["seed"], num_epochs=settings["epochs"],
+                               output_dir=str(group_dir / "training"))
+        config["experiment"]["name"] = name
+        config_path = group_dir / "config.json"
+        write_json(config_path, config)
+        training = {"name": name, "seed": settings["seed"], "config": str(config_path),
+                    "status": "pending", "training_complete": False,
+                    "wandb_id": uuid.uuid4().hex[:8]}
     return {
         "version": MANIFEST_VERSION, "group": args.group, "signature": signature,
-        "settings": settings,
-        "training": {"name": name, "seed": settings["seed"], "config": str(config_path),
-                     "status": "pending", "training_complete": False,
-                     "wandb_id": uuid.uuid4().hex[:8]},
+        "settings": settings, "training": training,
         "trials": [{"index": index, "name": "trial_{:02d}".format(index),
                     "seed": trial_seed(settings, index), "status": "pending"}
                    for index in range(1, settings["n_trials"] + 1)],
@@ -205,12 +282,16 @@ def evaluate_trial(entry, manifest, group_dir):
     command = [sys.executable, "-m", "robomimic.scripts.rollout_best",
                "--checkpoint", training["checkpoint"]["path"], "--output-dir", str(export_dir),
                "--n-rollouts", str(settings["rollouts_per_trial"]), "--seed", str(entry["seed"]),
-               "--video-skip", str(settings["video_skip"]), "--fps", str(settings["fps"]),
-               "--camera-names", *settings["camera_names"]]
+               "--video-skip", str(settings["video_skip"]), "--fps", str(settings["fps"])]
+    if settings.get("horizon") is not None:
+        command += ["--horizon", str(settings["horizon"])]
+    command += ["--camera-names", *settings["camera_names"]]
     if settings["keep_failures"]:
         command.append("--keep-failures")
     env = os.environ.copy()
-    env["PYTHONHASHSEED"] = str(training["seed"])
+    # A model trained elsewhere has no training seed; any fixed value gives the same repeatability.
+    hash_seed = training["seed"] if training["seed"] is not None else settings["eval_seed"]
+    env["PYTHONHASHSEED"] = str(hash_seed)
     entry["status"] = "evaluating"
     write_json(manifest_path, manifest)
     print("Evaluating {} of {} | seeds {}-{}".format(
@@ -238,14 +319,25 @@ def launch(args, group_dir):
         manifest = new_manifest(args, group_dir, settings, signature)
         write_json(manifest_path, manifest)
     training, settings = manifest["training"], manifest["settings"]
-    print("Group: {} | training seed {} for {} epochs | {} evaluation trials x {} rollouts | output: {}".format(
-        args.group, training["seed"], settings["epochs"], settings["n_trials"],
-        settings["rollouts_per_trial"], group_dir), flush=True)
-    active = training
+    if settings.get("mode") == "evaluate":
+        epoch = training["checkpoint"]["epoch"]
+        print("Group: {} | existing checkpoint {} (epoch {}) | {} evaluation trials x {} rollouts | output: {}".format(
+            args.group, training["checkpoint"]["path"], "unknown" if epoch is None else epoch,
+            settings["n_trials"], settings["rollouts_per_trial"], group_dir), flush=True)
+        if not training["history"]:
+            print("No metrics journal next to this checkpoint, so the report has the evaluation "
+                  "statistics but no per-epoch curves.", flush=True)
+    else:
+        print("Group: {} | training seed {} for {} epochs | {} evaluation trials x {} rollouts | output: {}".format(
+            args.group, training["seed"], settings["epochs"], settings["n_trials"],
+            settings["rollouts_per_trial"], group_dir), flush=True)
+    active = None
     try:
         if not training["training_complete"]:
+            active = training
             train_model(manifest, group_dir, args)
         if "checkpoint" not in training:
+            active = training
             choose_checkpoint(manifest, group_dir)
         for entry in manifest["trials"]:
             if entry["status"] == "complete":
@@ -254,10 +346,11 @@ def launch(args, group_dir):
             active = entry
             evaluate_trial(entry, manifest, group_dir)
     except BaseException as exc:
-        active.update(status="failed", error="{}: {}".format(type(exc).__name__, exc))
-        write_json(manifest_path, manifest)
-        print("Stopped at {}. Fix the error, then repeat this command with --resume.".format(
-            active["name"]), file=sys.stderr, flush=True)
+        if active is not None:
+            active.update(status="failed", error="{}: {}".format(type(exc).__name__, exc))
+            write_json(manifest_path, manifest)
+            print("Stopped at {}. Fix the error, then repeat this command with --resume.".format(
+                active["name"]), file=sys.stderr, flush=True)
         raise
     return manifest
 
@@ -294,12 +387,16 @@ def print_summary(report, manifest):
 def publish_report(report, manifest, result_dir, args):
     if args.wandb_mode == "disabled":
         return
+    # An existing model has no training config to take the project from.
+    config = manifest["settings"].get("config") or {}
+    project = args.wandb_project or config.get("experiment", {}).get("logging", {}).get("wandb_proj_name")
+    if not project:
+        raise ValueError("Set --wandb-project (or --wandb-mode disabled) to upload the results")
     import wandb
     from robomimic import macros as Macros
     if Macros.WANDB_API_KEY is not None:
         os.environ.setdefault("WANDB_API_KEY", Macros.WANDB_API_KEY)
     entity = args.wandb_entity or os.environ.get("WANDB_ENTITY") or Macros.WANDB_ENTITY
-    project = args.wandb_project or manifest["settings"]["config"]["experiment"]["logging"]["wandb_proj_name"]
     training, selection = manifest["training"], report["selection"]
     # The evaluation run joins the training run's group but always has its own run ID.
     run = wandb.init(project=project, entity=entity, group=manifest["group"], job_type="evaluation",
@@ -343,14 +440,20 @@ def run(args):
         raise ValueError("Group must be a folder name without path separators")
     group_dir = Path(args.output_dir).expanduser().resolve() / args.group
     manifest = load_manifest(group_dir) if args.aggregate_only else launch(args, group_dir)
-    if (manifest["training"]["status"] != "trained" or not manifest["trials"]
+    training, settings = manifest["training"], manifest["settings"]
+    if (training["status"] not in ("trained", "external") or not manifest["trials"]
             or any(trial["status"] != "complete" for trial in manifest["trials"])):
         raise ValueError("Complete training and every evaluation trial before summarizing the experiment")
-    report = summarize(read_history(manifest["training"]["history"]), manifest["settings"]["epochs"],
-                       manifest["training"]["checkpoint"], manifest["trials"])
+    history = read_history(training["history"]) if training.get("history") else None
+    # A model trained elsewhere reports through the last epoch its journal recorded.
+    epochs = settings["epochs"] if settings.get("mode") != "evaluate" else (max(history) if history else None)
+    report = summarize(history, epochs, training["checkpoint"], manifest["trials"])
     result_dir = write_report(report, manifest, group_dir)
-    print("Training and {} evaluation trials complete. Curves, trial results and statistics saved in {}".format(
-        report["n_trials"], result_dir), flush=True)
+    if settings.get("mode") == "evaluate":
+        done = "{} evaluation trials complete. Trial results and statistics saved in {}"
+    else:
+        done = "Training and {} evaluation trials complete. Curves, trial results and statistics saved in {}"
+    print(done.format(report["n_trials"], result_dir), flush=True)
     print_summary(report, manifest)
     publish_report(report, manifest, result_dir, args)
     return report
@@ -358,15 +461,22 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", help="Training JSON template; required unless --aggregate-only")
+    parser.add_argument("--config", help="Training JSON template; required to train a model")
     parser.add_argument("--dataset", help="Override train.data with this local dataset")
-    parser.add_argument("--epochs", type=int, default=2000)
+    parser.add_argument("--epochs", type=int, help="Training epochs (default 2000)")
     parser.add_argument("--seed", type=int, help="Training seed (default: train.seed from the template)")
+    parser.add_argument("--checkpoint",
+                        help="Skip training: evaluate this existing .pth checkpoint")
+    parser.add_argument("--run-dir",
+                        help="Skip training: evaluate the best-success checkpoint of this existing run "
+                             "(experiment folder, timestamped run, or its models folder)")
     parser.add_argument("--n-trials", type=int, default=10,
                         help="Repeated evaluation trials of the best checkpoint")
     parser.add_argument("--rollouts-per-trial", type=int, default=50, help="Episodes in each evaluation trial")
     parser.add_argument("--eval-seed", type=int, default=10000,
                         help="Trial t, rollout j (both counted from 0) uses seed eval-seed + t * rollouts-per-trial + j")
+    parser.add_argument("--horizon", type=int,
+                        help="Override the rollout horizon of the checkpoint in the evaluation trials")
     parser.add_argument("--group", help="Unique experiment group; defaults to a timestamped name")
     parser.add_argument("--output-dir", default=str(REPO_ROOT / "trained_models"))
     parser.add_argument("--rollouts", type=int, help="Training evaluation episodes (default: template)")
@@ -383,12 +493,24 @@ def main():
     parser.add_argument("--aggregate-only", action="store_true", help="Rebuild/re-upload results for a completed group")
     parser.add_argument("--debug", action="store_true", help="Two epochs, three gradient steps/epoch, two short rollouts")
     args = parser.parse_args()
-    if not args.aggregate_only and not args.config:
-        parser.error("--config is required for training")
+    evaluating = bool(args.checkpoint or args.run_dir)
+    if args.checkpoint and args.run_dir:
+        parser.error("--checkpoint and --run-dir are alternatives; give one")
+    if evaluating:
+        training_only = [name for name in ("config", "dataset", "epochs", "seed", "rollouts", "rollout_rate")
+                         if getattr(args, name) is not None]
+        if training_only:
+            parser.error("cannot combine {} with --checkpoint/--run-dir: they only apply when "
+                         "training a model".format(
+                             ", ".join("--" + name.replace("_", "-") for name in training_only)))
+    elif args.epochs is None:
+        args.epochs = 2000
+    if not args.aggregate_only and not args.config and not evaluating:
+        parser.error("--config is required to train a model (or give --checkpoint / --run-dir to evaluate one)")
     if (args.resume or args.aggregate_only) and not args.group:
         parser.error("--group is required for --resume or --aggregate-only")
-    for name in ("n_trials", "epochs", "rollouts_per_trial", "video_skip"):
-        if getattr(args, name) < 1:
+    for name in ("n_trials", "epochs", "rollouts_per_trial", "video_skip", "horizon"):
+        if getattr(args, name) is not None and getattr(args, name) < 1:
             parser.error(name.replace("_", "-") + " must be positive")
     if args.eval_seed < 0 or args.eval_seed + args.n_trials * args.rollouts_per_trial > 2 ** 32:
         parser.error("Evaluation seeds must be in [0, 2**32)")

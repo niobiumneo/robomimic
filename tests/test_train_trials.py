@@ -11,6 +11,7 @@ import io
 import json
 import math
 import os
+import shutil
 import statistics
 import subprocess
 import sys
@@ -24,13 +25,26 @@ import numpy as np
 
 from robomimic.scripts import train_trials
 from robomimic.utils.trial_metrics import (
-    ROLLOUT_FIELDS, TRIAL_FIELDS, ScalarJournal, describe, read_history,
-    seed_environment, select_checkpoint, summarize, trial_rows)
+    ROLLOUT_FIELDS, TRIAL_FIELDS, ScalarJournal, describe, describe_checkpoint,
+    parse_checkpoint_name, read_history, seed_environment, select_checkpoint, summarize,
+    trial_rows)
 
 # Trainer-style checkpoint names. Epochs 100 and 150 tie at 0.8: the earlier one wins.
 CHECKPOINTS = ("model_epoch_50_square_success_0.4.pth", "model_epoch_100_square_success_0.8.pth",
                "model_epoch_150_square_success_0.8.pth", "model_epoch_200.pth")
 TRAINING_SUCCESS = {50: .4, 100: .8, 150: .8}
+
+
+def write_finished_run(run_dir, epochs, seed):
+    """Checkpoints and a metrics journal laid out like the trainer's output."""
+    for name in CHECKPOINTS:
+        (run_dir / "models" / name).touch()
+    with (run_dir / "logs" / "metrics.jsonl").open("w") as stream:
+        for epoch in range(1, epochs + 1):
+            metrics = {"Train/Loss": epochs - epoch + seed, "System/RAM Usage (MB)": 1234}
+            if epoch % 50 == 0 or epoch == epochs:
+                metrics["Rollout/Success_Rate/square"] = TRAINING_SUCCESS.get(epoch, .5)
+            stream.write(json.dumps({"epoch": epoch, "metrics": metrics}) + "\n")
 
 
 class LauncherTests(unittest.TestCase):
@@ -55,9 +69,24 @@ class LauncherTests(unittest.TestCase):
                       output_dir=str(self.root / "outputs"), rollouts=None, rollout_rate=None,
                       metric_key=None, camera_names=["agentview"], video_skip=5, fps=None,
                       keep_failures=False, wandb_project="cami-test", wandb_entity=None,
-                      wandb_mode="disabled", resume=False, aggregate_only=False, debug=False)
+                      wandb_mode="disabled", resume=False, aggregate_only=False, debug=False,
+                      checkpoint=None, run_dir=None, horizon=None)
         values.update(changes)
         return argparse.Namespace(**values)
+
+    def evaluation_args(self, **changes):
+        """Arguments for evaluating a model that already exists: no training options."""
+        values = dict(config=None, dataset=None, epochs=None)
+        values.update(changes)
+        return self.args(**values)
+
+    def make_run(self, epochs=120, seed=2):
+        """A finished run like the ten-seed launcher left behind: trials/trial_02_seed_2."""
+        run_dir = self.root / "old/trials/trial_02_seed_2/20260930000000"
+        (run_dir / "models").mkdir(parents=True)
+        (run_dir / "logs").mkdir()
+        write_finished_run(run_dir, epochs, seed)
+        return run_dir
 
     def child(self, command, cwd, env, check):
         self.calls.append((command, env.copy()))
@@ -82,14 +111,7 @@ class LauncherTests(unittest.TestCase):
         if self.fail_training_once:
             self.fail_training_once = False
             raise subprocess.CalledProcessError(1, command)
-        for name in CHECKPOINTS:
-            (run_dir / "models" / name).touch()
-        with (run_dir / "logs" / "metrics.jsonl").open("w") as stream:
-            for epoch in range(1, epochs + 1):
-                metrics = {"Train/Loss": epochs - epoch + seed, "System/RAM Usage (MB)": 1234}
-                if epoch % 50 == 0 or epoch == epochs:
-                    metrics["Rollout/Success_Rate/square"] = TRAINING_SUCCESS.get(epoch, .5)
-                stream.write(json.dumps({"epoch": epoch, "metrics": metrics}) + "\n")
+        write_finished_run(run_dir, epochs, seed)
 
     def fake_evaluation(self, command):
         self.assertNotIn("--run-dir", command)
@@ -368,7 +390,227 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(training_config["experiment"]["logging"]["wandb_proj_name"], "cami")
 
 
+    # --- evaluating a model that already exists (--checkpoint / --run-dir) -----------------
+
+    def test_best_checkpoint_of_an_existing_run_is_evaluated_without_training(self):
+        run_dir = self.make_run()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            report = train_trials.run(self.evaluation_args(run_dir=str(run_dir.parent), n_trials=3))
+        self.assertEqual(self.commands("train"), [])
+        evaluations = self.commands("rollout_best")
+        self.assertEqual(len(evaluations), 3)
+        best = (run_dir / "models/model_epoch_100_square_success_0.8.pth").resolve()
+        self.assertEqual({c[c.index("--checkpoint") + 1] for c in evaluations}, {str(best)})
+        self.assertEqual([int(c[c.index("--seed") + 1]) for c in evaluations], [10000, 10050, 10100])
+        self.assertEqual(report["selection"], {"metric_key": "square", "training_success_rate": 0.8,
+                                               "epoch": 100, "path": str(best)})
+        # The run's own journal supplies the curves, the last epoch, and the selected epoch.
+        self.assertEqual(report["epochs"], 120)
+        self.assertEqual(report["summary"]["Final/Train/Loss"]["mean"], 2)
+        self.assertEqual(report["summary"]["BestCheckpoint/Train/Loss"]["mean"], 22)
+        self.assertEqual(len([r for r in report["curves"] if r["metric"] == "Train/Loss"]), 120)
+        manifest = json.loads((self.group_dir / "manifest.json").read_text())
+        self.assertEqual((manifest["training"]["status"], manifest["training"]["seed"]), ("external", None))
+        self.assertEqual([t["status"] for t in manifest["trials"]], ["complete"] * 3)
+        self.assertFalse((self.group_dir / "training").exists())
+        self.assertFalse((self.group_dir / "config.json").exists())
+        # PYTHONHASHSEED must be an integer even though there is no training seed.
+        for _, env in self.calls:
+            self.assertTrue(env["PYTHONHASHSEED"].isdigit())
+
+    def test_a_hand_picked_checkpoint_gets_its_epoch_and_success_from_its_name(self):
+        # The case of a run's best model at epoch 1000 with 90% in-training success.
+        run_dir = self.make_run(epochs=1200)
+        picked = run_dir / "models/model_epoch_1000_square_success_0.9.pth"
+        picked.touch()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            report = train_trials.run(self.evaluation_args(checkpoint=str(picked), n_trials=2))
+        self.assertEqual(report["selection"], {"metric_key": "square", "training_success_rate": 0.9,
+                                               "epoch": 1000, "path": str(picked.resolve())})
+        # The explicit file wins over the 0.8 checkpoint that automatic selection would pick.
+        self.assertEqual({c[c.index("--checkpoint") + 1] for c in self.commands("rollout_best")},
+                         {str(picked.resolve())})
+        self.assertEqual(report["epochs"], 1200)
+        self.assertEqual(report["summary"]["BestCheckpoint/Train/Loss"]["mean"], 202)
+        self.assertEqual(report["summary"]["Selection/Epoch"]["mean"], 1000)
+
+    def test_a_renamed_checkpoint_without_a_journal_reports_only_the_evaluation(self):
+        checkpoint = self.root / "best.pth"
+        checkpoint.touch()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            report = train_trials.run(self.evaluation_args(checkpoint=str(checkpoint), n_trials=2))
+        self.assertEqual(report["curves"], [])
+        self.assertIsNone(report["epochs"])
+        self.assertTrue(report["summary"])
+        self.assertTrue(all(key.startswith("Evaluation/") for key in report["summary"]))
+        self.assertEqual(report["selection"], {"metric_key": None, "training_success_rate": None,
+                                               "epoch": None, "path": str(checkpoint.resolve())})
+        with (self.group_dir / "results/trial_results.csv").open() as stream:
+            self.assertEqual({row["env"] for row in csv.DictReader(stream)}, {"checkpoint_env"})
+        self.assertEqual((self.group_dir / "results/curves.csv").read_text().strip(), "epoch,metric,value")
+
+    def test_a_journal_that_does_not_cover_the_checkpoint_epoch_is_ignored(self):
+        run_dir = self.make_run(epochs=80)  # the checkpoint below is epoch 100
+        picked = run_dir / "models/model_epoch_100_square_success_0.8.pth"
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            report = train_trials.run(self.evaluation_args(checkpoint=str(picked), n_trials=1))
+        self.assertEqual(report["curves"], [])
+        # The epoch is still known from the file name; nothing that needs the journal is reported.
+        self.assertEqual(report["selection"]["epoch"], 100)
+        self.assertEqual(report["summary"]["Selection/Epoch"]["mean"], 100)
+        self.assertFalse(any(key.startswith(("Final/", "BestCheckpoint/")) for key in report["summary"]))
+        self.assertIn("Evaluation/Success_Rate", report["summary"])
+
+    def test_last_checkpoint_has_curves_but_no_selected_epoch_and_copies_get_no_journal(self):
+        run_dir = self.make_run()
+        (run_dir / "last.pth").touch()
+        (run_dir / "copy.pth").touch()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            report = train_trials.run(self.evaluation_args(checkpoint=str(run_dir / "last.pth"), n_trials=1))
+        self.assertIsNone(report["selection"]["epoch"])
+        self.assertEqual(report["epochs"], 120)
+        self.assertEqual(report["summary"]["Final/Train/Loss"]["mean"], 2)
+        self.assertFalse(any(key.startswith(("BestCheckpoint/", "Selection/")) for key in report["summary"]))
+        self.assertTrue(report["curves"])
+        # The same weights under another name, in the same folder, could belong to any run.
+        shutil.rmtree(self.group_dir)
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            report = train_trials.run(self.evaluation_args(checkpoint=str(run_dir / "copy.pth"), n_trials=1))
+        self.assertEqual(report["curves"], [])
+        self.assertIsNone(report["epochs"])
+
+    def test_checkpoint_evaluation_resumes_and_rebuilds_its_report(self):
+        run_dir = self.make_run()
+        self.fail_trial_once = 2
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            with self.assertRaises(subprocess.CalledProcessError):
+                train_trials.run(self.evaluation_args(run_dir=str(run_dir), n_trials=3))
+        manifest = json.loads((self.group_dir / "manifest.json").read_text())
+        # A failed trial must not relabel the model itself as failed.
+        self.assertEqual(manifest["training"]["status"], "external")
+        self.assertEqual([t["status"] for t in manifest["trials"]], ["complete", "failed", "pending"])
+        self.calls.clear()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            result = train_trials.run(self.evaluation_args(run_dir=str(run_dir), n_trials=3, resume=True))
+        self.assertEqual([int(c[c.index("--seed") + 1]) for c in self.commands("rollout_best")], [10050, 10100])
+        with mock.patch.object(train_trials.subprocess, "run") as child:
+            rebuilt = train_trials.run(self.evaluation_args(aggregate_only=True))
+            child.assert_not_called()
+        self.assertEqual(result["summary"], rebuilt["summary"])
+        with self.assertRaisesRegex(ValueError, "Resume settings differ"):
+            train_trials.run(self.evaluation_args(run_dir=str(run_dir), n_trials=3, resume=True, horizon=5))
+
+    def test_missing_or_misplaced_checkpoint_paths_get_clear_errors(self):
+        with self.assertRaisesRegex(FileNotFoundError, "Checkpoint not found: .*nowhere/model.pth"):
+            train_trials.make_plan(self.evaluation_args(checkpoint=str(self.root / "nowhere/model.pth")))
+        with self.assertRaisesRegex(ValueError, "use --run-dir"):
+            train_trials.make_plan(self.evaluation_args(checkpoint=str(self.make_run())))
+        with self.assertRaisesRegex(ValueError, "No timestamped training run"):
+            train_trials.make_plan(self.evaluation_args(run_dir=str(self.root)))
+
+    def test_existing_model_needs_a_wandb_project_unless_logging_is_disabled(self):
+        run_dir = self.make_run()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            with self.assertRaisesRegex(ValueError, "wandb-project"):
+                train_trials.run(self.evaluation_args(run_dir=str(run_dir), wandb_mode="online",
+                                                      wandb_project=None))
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.group_dir.exists())
+
+    def test_online_evaluation_of_an_existing_model_creates_no_training_run(self):
+        run_dir = self.make_run()
+        fake = FakeRun()
+
+        class Artifact:
+            def __init__(self, *args, **kwargs):
+                self.paths = []
+
+            def add_file(self, path):
+                self.paths.append(path)
+
+        wandb = types.SimpleNamespace(init=mock.Mock(return_value=fake), Artifact=Artifact,
+                                      Table=lambda **kwargs: types.SimpleNamespace(**kwargs))
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(self.evaluation_args(run_dir=str(run_dir), n_trials=2, wandb_mode="online",
+                                                  wandb_project="cami-best"))
+        kwargs = wandb.init.call_args.kwargs
+        self.assertEqual(wandb.init.call_count, 1)
+        self.assertEqual((kwargs["project"], kwargs["job_type"], kwargs["group"], kwargs["name"]),
+                         ("cami-best", "evaluation", "test-group", "test-group-eval"))
+        self.assertIsNone(kwargs["config"]["training_seed"])
+        self.assertIsNone(kwargs["config"]["training_run_id"])
+        self.assertEqual(kwargs["config"]["checkpoint_epoch"], 100)
+        self.assertEqual(self.commands("train"), [])
+        self.assertTrue(fake.finished)
+
+    def test_horizon_override_reaches_the_rollouts_only_when_given(self):
+        run_dir = self.make_run()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(self.evaluation_args(run_dir=str(run_dir), n_trials=1, horizon=123))
+        command = self.commands("rollout_best")[0]
+        self.assertEqual(command[command.index("--horizon") + 1], "123")
+
+    def test_training_plans_are_unchanged_by_the_evaluate_only_options(self):
+        settings, _ = train_trials.make_plan(self.args())
+        self.assertNotIn("mode", settings)
+        self.assertNotIn("horizon", settings)
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(self.args(n_trials=1))
+        self.assertNotIn("--horizon", self.commands("rollout_best")[0])
+        self.assertEqual(len(self.commands("train")), 1)
+
+    def test_debug_evaluation_is_short(self):
+        run_dir = self.make_run()
+        settings, _ = train_trials.make_plan(self.evaluation_args(run_dir=str(run_dir), debug=True))
+        self.assertEqual((settings["rollouts_per_trial"], settings["horizon"]), (2, 10))
+        settings, _ = train_trials.make_plan(self.evaluation_args(run_dir=str(run_dir), debug=True, horizon=30))
+        self.assertEqual(settings["horizon"], 30)
+
+    def test_command_line_rules_for_evaluating_an_existing_model(self):
+        run_dir = self.make_run()
+
+        def parse(*argv):
+            with mock.patch.object(train_trials, "run") as launcher, \
+                 mock.patch.object(sys, "argv", ["train_trials", *argv]):
+                train_trials.main()
+            return launcher.call_args.args[0]
+
+        args = parse("--run-dir", str(run_dir), "--wandb-mode", "disabled")
+        self.assertEqual((args.epochs, args.config, args.seed, args.n_trials), (None, None, None, 10))
+        self.assertEqual(parse("--checkpoint", "m.pth", "--horizon", "9").horizon, 9)
+        # Training options, both sources at once, nothing to do, or a bad horizon: all rejected.
+        for bad in (["--checkpoint", "a.pth", "--run-dir", "b"],
+                    ["--run-dir", "b", "--config", str(self.config)],
+                    ["--run-dir", "b", "--epochs", "5"],
+                    ["--run-dir", "b", "--seed", "3"],
+                    ["--run-dir", "b", "--horizon", "0"],
+                    []):
+            with mock.patch.object(sys, "argv", ["train_trials", *bad]), \
+                 contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                train_trials.main()
+        # Training still defaults to 2000 epochs.
+        self.assertEqual(parse("--config", str(self.config)).epochs, 2000)
+
+
 class MetricTests(unittest.TestCase):
+    def test_checkpoint_names_give_epoch_and_success(self):
+        self.assertEqual(parse_checkpoint_name("m/model_epoch_1000_square_success_0.9.pth"),
+                         (1000, [("square", 0.9)]))
+        self.assertEqual(parse_checkpoint_name("m/model_epoch_100_square_image_84_with_force_success_0.8.pth"),
+                         (100, [("square_image_84_with_force", 0.8)]))
+        self.assertEqual(parse_checkpoint_name("best.pth"), (None, []))
+        self.assertEqual(parse_checkpoint_name("model_epoch_50_square_return_12.0_square_success_0.8"
+                                               "_tool_hang_return_3.0_tool_hang_success_0.4.pth")[1],
+                         [("square", 0.8), ("tool_hang", 0.4)])
+        self.assertEqual(describe_checkpoint("model_epoch_7.pth"),
+                         {"metric_key": None, "training_success_rate": None, "epoch": 7})
+        ambiguous = "model_epoch_50_square_success_0.8_tool_hang_success_0.4.pth"
+        self.assertIsNone(describe_checkpoint(ambiguous)["training_success_rate"])
+        self.assertEqual(describe_checkpoint(ambiguous, "tool_hang"),
+                         {"metric_key": "tool_hang", "training_success_rate": 0.4, "epoch": 50})
+
+
     def test_nonfinite_values_have_visible_counts_and_no_fabricated_sd(self):
         stats = describe([1, None, float("nan"), 3])
         self.assertEqual(stats["mean"], 2)

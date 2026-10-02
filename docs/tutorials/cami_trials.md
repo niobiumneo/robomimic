@@ -49,6 +49,58 @@ Videos use `--camera-names` (default `agentview`) and `--video-skip 5` at
 keep failure and simulator-error videos too. Trajectories of all rollouts are
 saved either way.
 
+## Evaluate a model you already have
+
+To run the same trials on a model you trained earlier, skip training and give
+either the checkpoint file or its run folder:
+
+```bash
+# One checkpoint, for example the epoch-1000 model that reached 90% in training
+python -m robomimic.scripts.train_trials \
+  --checkpoint trained_models/<group>/trials/trial_02_seed_2/<timestamp>/models/model_epoch_1000_<dataset>_success_0.9.pth \
+  --n-trials 10 --rollouts-per-trial 50 \
+  --group square-cami-trial2-best \
+  --wandb-project cami
+
+# Or let the launcher pick the best-success checkpoint of a run
+python -m robomimic.scripts.train_trials \
+  --run-dir trained_models/<group>/trials/trial_02_seed_2 \
+  --n-trials 10 --group square-cami-trial2-best --wandb-project cami
+```
+
+`--run-dir` takes an experiment folder (its latest timestamped run), a timestamped
+run, or a `models` folder. It chooses the highest recorded training success rate,
+ties preferring the earlier epoch. List a run's candidates with
+`ls <run>/models | grep success`.
+
+Nothing is trained, so `--config`, `--dataset`, `--epochs`, `--seed`,
+`--rollouts`, and `--rollout-rate` are rejected, and `--wandb-project` is
+required unless you pass `--wandb-mode disabled` (there is no template to take
+it from). Everything else works as above: the same seed blocks and outputs,
+`--resume`, `--aggregate-only`, `--keep-failures`, `--camera-names`, and
+`--video-skip`. `--horizon N` overrides the horizon stored in the checkpoint
+(400 for Square, 700 for Tool Hang) for the trials only. The W&B group gets just
+the `<group>-eval` run, because no training run is created.
+
+What the report contains depends on what sits next to the checkpoint:
+
+- The epoch and the in-training success rate come from the trainer's file name,
+  `model_epoch_<N>_<dataset>_success_<rate>.pth`. A renamed file still works, but
+  its epoch and rate are then unknown and left empty.
+- A run made by this repository's trainer keeps `logs/metrics.jsonl` next to
+  `models/`. When it covers the checkpoint's epoch, the report also has
+  `curves.csv` and the `Final` and `BestCheckpoint` values. `last.pth` in the run
+  folder is matched to that journal too, but a copy under any other name is not,
+  because it could belong to a different run. Without a usable journal the report
+  has the `Evaluation` statistics (and `Selection/Epoch` when the epoch is known).
+  Runs that only wrote TensorBoard logs have no journal.
+
+The checkpoint has to load with this code and a robosuite that can build its
+environment. Its in-training success rate (for example 0.9) is the best of many
+evaluations and is optimistic. The trials are a fresh measurement of the same
+weights, so expect a lower number. A model picked as the best of several seeds is
+also better than the method's expected result; report the other seeds too.
+
 ## Which numbers to report
 
 | Summary field | What it is |
@@ -195,7 +247,7 @@ python -m unittest discover -s tests -p test_train_trials.py -v
 
 These checks exercise the single training job and the repeated trials with
 synthetic child outputs: the shared checkpoint, disjoint seeds, exact
-statistics, failure and resume handling, the multi-eval CSV columns, and the W&B
-calls. They do not run neural-network training or MuJoCo. The existing
+statistics, failure and resume handling, the multi-eval CSV columns, the W&B
+calls, and the evaluation of an existing checkpoint or run. They do not run neural-network training or MuJoCo. The existing
 `tests/test_rollout_best.py` covers real checkpoint restore and video export in
 an environment containing the full simulation and training dependencies.

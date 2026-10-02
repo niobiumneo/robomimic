@@ -79,7 +79,8 @@ For online loss curves and rollout results, see the
 
 To train one model and evaluate its best checkpoint over repeated 50-episode
 trials, with trajectories, success videos, per-epoch curves, a manifest, and
-W&B logging, see the [CaMI trial runner guide](docs/tutorials/cami_trials.md).
+W&B logging, or to run those trials on a checkpoint you already have, see the
+[CaMI trial runner guide](docs/tutorials/cami_trials.md).
 
 Use [`rebuild_cami_dataset.py`](rebuild_cami_dataset.py) to replay Square and
 Tool Hang demonstrations with synchronized wrist force/torque and future

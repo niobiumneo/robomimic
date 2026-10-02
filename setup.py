@@ -33,6 +33,7 @@ setup(
         "transformers==4.41.2",
         "diffusers==0.11.1",
     ],
+    extras_require={"wandb": ["wandb"]},
     eager_resources=['*'],
     include_package_data=True,
     python_requires='>=3',

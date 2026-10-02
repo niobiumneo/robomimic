@@ -118,6 +118,7 @@ venv.bak/
 .mypy_cache/
 *.mp4
 *.pth
+/trained_models/
 
 # private macros
 macros_private.py

@@ -4,15 +4,12 @@ and to tensorboard.
 """
 import os
 import sys
+import json
 import numpy as np
-from datetime import datetime
 from contextlib import contextmanager
 import textwrap
-import time
 from tqdm import tqdm
 from termcolor import colored
-
-import robomimic
 
 # global list of warning messages can be populated with @log_warning and flushed with @flush_warnings
 WARNINGS_BUFFER = []
@@ -41,60 +38,87 @@ class DataLogger(object):
     """
     Logging class to log metrics to tensorboard and/or retrieve running statistics about logged data.
     """
-    def __init__(self, log_dir, config, log_tb=True, log_wandb=False):
+    def __init__(self, log_dir, config, log_tb=True, log_wandb=False, quiet=False):
         """
         Args:
             log_dir (str): base path to store logs
             log_tb (bool): whether to use tensorboard logging
+            quiet (bool): reduce W&B informational output while retaining warnings and errors
         """
         self._tb_logger = None
         self._wandb_logger = None
         self._data = dict() # store all the scalar data logged so far
+        from robomimic.utils.trial_metrics import ScalarJournal
+        self._journal = ScalarJournal(log_dir)
 
         if log_tb:
             from tensorboardX import SummaryWriter
             self._tb_logger = SummaryWriter(os.path.join(log_dir, 'tb'))
 
         if log_wandb:
-            import wandb
+            try:
+                import wandb
+            except ImportError as exc:
+                self._journal.close()
+                if self._tb_logger is not None:
+                    self._tb_logger.close()
+                raise ImportError(
+                    "W&B logging is enabled. Install it with: python -m pip install wandb"
+                ) from exc
             import robomimic.macros as Macros
-            
-            # set up wandb api key if specified in macros
+
+            # Normal `wandb login` credentials and WANDB_* environment variables
+            # work without a private macros file. Keep legacy macros as fallbacks.
             if Macros.WANDB_API_KEY is not None:
-                os.environ["WANDB_API_KEY"] = Macros.WANDB_API_KEY
+                os.environ.setdefault("WANDB_API_KEY", Macros.WANDB_API_KEY)
+            entity = os.environ.get("WANDB_ENTITY") or Macros.WANDB_ENTITY
 
-            assert Macros.WANDB_ENTITY is not None, "WANDB_ENTITY macro is set to None." \
-                    "\nSet this macro in {base_path}/macros_private.py" \
-                    "\nIf this file does not exist, first run python {base_path}/scripts/setup_macros.py".format(base_path=robomimic.__path__[0])
-            
-            # attempt to set up wandb 10 times. If unsuccessful after these trials, don't use wandb
-            num_attempts = 10
-            for attempt in range(num_attempts):
-                try:
-                    # set up wandb
-                    self._wandb_logger = wandb
-
-                    self._wandb_logger.init(
-                        entity=Macros.WANDB_ENTITY,
-                        project=config.experiment.logging.wandb_proj_name,
-                        name=config.experiment.name,
-                        dir=log_dir,
-                        mode=("offline" if attempt == num_attempts - 1 else "online"),
-                    )
-
-                    # set up info for identifying experiment
-                    wandb_config = {k: v for (k, v) in config.meta.items() if k not in ["hp_keys", "hp_values"]}
-                    for (k, v) in zip(config.meta["hp_keys"], config.meta["hp_values"]):
-                        wandb_config[k] = v
-                    if "algo" not in wandb_config:
-                        wandb_config["algo"] = config.algo_name
-                    self._wandb_logger.config.update(wandb_config)
-
-                    break
-                except Exception as e:
-                    log_warning("wandb initialization error (attempt #{}): {}".format(attempt + 1, e))
-                    self._wandb_logger = None
-                    time.sleep(30)
+            # Save the effective training config, including the fitted force
+            # scale. Handwritten JSON templates may use null for sweep lists.
+            wandb_config = config.to_dict()
+            wandb_config["sweep_parameters"] = dict(zip(
+                config.meta.get("hp_keys") or [],
+                config.meta.get("hp_values") or [],
+            ))
+            # A flat field makes filtering by training seed easy in the W&B UI.
+            # The experiment group is passed to wandb.init below.
+            wandb_config["train_seed"] = config.train.seed
+            try:
+                # W&B's quiet setting keeps warnings/errors, unlike silent=True.
+                # Print our own run URL below so it is always easy to find.
+                init_kwargs = {"settings": wandb.Settings(quiet=True)} if quiet else {}
+                self._wandb_logger = wandb.init(
+                    entity=entity,
+                    project=config.experiment.logging.wandb_proj_name,
+                    name=config.experiment.name,
+                    group=os.environ.get("WANDB_RUN_GROUP"),
+                    job_type=os.environ.get("WANDB_JOB_TYPE"),
+                    dir=log_dir,
+                    config=wandb_config,
+                    **init_kwargs,
+                )
+                self._wandb_logger.define_metric("epoch")
+                self._wandb_logger.define_metric("*", step_metric="epoch")
+                with open(os.path.join(log_dir, "wandb_run.json"), "w") as stream:
+                    json.dump({"id": self._wandb_logger.id,
+                               "group": os.environ.get("WANDB_RUN_GROUP"),
+                               "name": config.experiment.name}, stream)
+            except Exception as exc:
+                self._journal.close()
+                if self._tb_logger is not None:
+                    self._tb_logger.close()
+                # Online logging was requested: report setup errors instead of
+                # silently switching to offline mode or training without a run.
+                raise RuntimeError(
+                    "W&B initialization failed. Run `wandb login`, check that "
+                    "WANDB_ENTITY names a team/account you can write to, and "
+                    "check network access. For an intentional offline run, "
+                    "set WANDB_MODE=offline."
+                ) from exc
+            if getattr(self._wandb_logger, "offline", False):
+                print("W&B is offline; metrics are saved locally and need `wandb sync` to appear online.")
+            elif getattr(self._wandb_logger, "url", None):
+                print("W&B run: {}".format(self._wandb_logger.url), flush=True)
 
     def record(self, k, v, epoch, data_type='scalar', log_stats=False):
         """
@@ -110,11 +134,16 @@ class DataLogger(object):
         assert data_type in ['scalar', 'image']
 
         if data_type == 'scalar':
+            self._journal.record(k, v, epoch)
             # maybe update internal cache if logging stats for this key
             if log_stats or k in self._data: # any key that we're logging or previously logged
                 if k not in self._data:
                     self._data[k] = []
                 self._data[k].append(v)
+
+            if log_stats:
+                for stat_k, stat_v in self.get_stats(k).items():
+                    self._journal.record("{}/{}".format(k, stat_k), stat_v, epoch)
 
         # maybe log to tensorboard
         if self._tb_logger is not None:
@@ -159,10 +188,22 @@ class DataLogger(object):
         stats['max'] = np.max(self._data[k])
         return stats
 
+    def flush(self, epoch):
+        """Publish all metrics for a finished epoch as one W&B history row.
+
+        record() uses an explicit step, which leaves that row open so train,
+        validation, and rollout values share the same epoch. Commit only once
+        all of them have been recorded, so plots update before the next epoch.
+        """
+        self._journal.flush(epoch)
+        if self._wandb_logger is not None:
+            self._wandb_logger.log({"epoch": epoch}, step=epoch, commit=True)
+
     def close(self):
         """
         Run before terminating to make sure all logs are flushed
         """
+        self._journal.close()
         if self._tb_logger is not None:
             self._tb_logger.close()
 

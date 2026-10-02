@@ -27,6 +27,9 @@ class BCCaMICaNCEConfig(BCConfig):
         # the sequence window already loaded (obs_encoding[:, t, :] for
         # t = 0..T-1), never a separate next_obs batch entry.
         self.train.hdf5_load_next_obs = False
+        self.train.seq_length = 11
+        # The harvested consecutive pairs must not include repeated padding.
+        self.train.pad_seq_length = False
 
     def observation_config(self):
         super(BCCaMICaNCEConfig, self).observation_config()
@@ -41,6 +44,7 @@ class BCCaMICaNCEConfig(BCConfig):
 
     def algo_config(self):
         super(BCCaMICaNCEConfig, self).algo_config()
+        self.algo.rnn.enabled = True
 
         # Same optimizer names as BC_CaMI_LCP -- BC_CaMI_CaNCE builds the
         # identical two-network structure (gap_encoder, impulse_encoder),
@@ -64,6 +68,7 @@ class BCCaMICaNCEConfig(BCConfig):
 
         self.algo.cami.lcp.num_contacts = 1
         self.algo.cami.lcp.force_dim = 6
+        self.algo.cami.lcp.force_dataset_key = "obs/force"
 
         self.algo.cami.lcp.gap_hidden_dims = (256, 256)
         self.algo.cami.lcp.impulse_hidden_dims = (128,)

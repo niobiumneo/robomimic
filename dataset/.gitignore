@@ -1,0 +1,4 @@
+# Keep local training data out of ordinary source-code commits.
+*.hdf5
+*.h5
+*.partial

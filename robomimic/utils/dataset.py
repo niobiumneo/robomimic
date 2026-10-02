@@ -603,6 +603,10 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         # check if this key should be in memory
         key_should_be_in_memory = (self.hdf5_cache_mode in ["all", "low_dim"])
+        # Auxiliary keys keep their full HDF5 path in the cache. In particular,
+        # obs/force is cached as supervision even though force is not a policy obs.
+        if key_should_be_in_memory and key in self.dataset_keys:
+            return self.hdf5_cache[ep][key]
         if key_should_be_in_memory:
             if "/" in key:
                 key1, key2 = key.split("/")

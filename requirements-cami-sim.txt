@@ -1,0 +1,6 @@
+# Simulator versions recorded in environment.yml for the CaMI experiments.
+# Install explicitly alongside robomimic when using robosuite 1.5.2 datasets:
+#   python -m pip install -r requirements-cami-sim.txt
+# Newer MuJoCo bindings can fail robosuite 1.5.2's joint-type membership check.
+robosuite==1.5.2
+mujoco==3.5.0

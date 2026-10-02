@@ -11,3 +11,5 @@ from robomimic.algo.iris import IRIS
 from robomimic.algo.td3_bc import TD3_BC
 from robomimic.algo.diffusion_policy import DiffusionPolicyUNet
 from robomimic.algo.bc_cami import BC_CaMI
+from robomimic.algo.bc_cami_lcp_v1 import BC_CaMI_LCP
+from robomimic.algo.bc_cami_lcp_v2 import BC_CaMI_CaNCE

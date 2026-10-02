@@ -893,13 +893,14 @@ class RNN_MIMO_MLP(Module):
             return feats, rnn_state
         return feats
     
-    def forward_with_features(self, rnn_init_state=None, return_state=False, **inputs):
+    def forward_with_features(self, rnn_init_state=None, return_state=False, return_obs_encoding=False, **inputs):
         """
         Return decoded outputs and per-step fused latent features.
 
         Returns:
             outputs: dict of [B, T, ...] if per_step=True, else final-step outputs
             feats:   [B, T, D]
+            optionally pre-RNN observation encodings, for the LCP gap encoder
             optionally rnn_state
         """
         for obs_group in self.input_obs_group_shapes:
@@ -934,9 +935,12 @@ class RNN_MIMO_MLP(Module):
         else:
             outputs = self.nets["decoder"](feats[:, -1])
 
+        result = (outputs, feats)
+        if return_obs_encoding:
+            result += (rnn_inputs,)
         if return_state:
-            return outputs, feats, rnn_state
-        return outputs, feats
+            result += (rnn_state,)
+        return result
 
     def forward(self, rnn_init_state=None, return_state=False, **inputs):
         """

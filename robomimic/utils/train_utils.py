@@ -105,6 +105,10 @@ def load_data_for_training(config, obs_keys):
         valid_dataset (SequenceDataset instance): valid dataset object (only if using validation)
     """
 
+    # Also cover callers that use the loader directly, outside scripts/train.py.
+    from robomimic.utils.cami_dataset_utils import prepare_cami_datasets
+    prepare_cami_datasets(config)
+
     # config can contain an attribute to filter on
     train_filter_by_attribute = config.train.hdf5_filter_key
     valid_filter_by_attribute = config.train.hdf5_validation_filter_key
@@ -139,32 +143,15 @@ def load_data_for_training(config, obs_keys):
 
 
 def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None):
-    """
-    Create a SequenceDataset instance to pass to a torch DataLoader.
-
-    Args:
-        config (BaseConfig instance): config object
-
-        obs_keys (list): list of observation modalities that are required for
-            training (this will inform the dataloader on what modalities to load)
-
-        filter_by_attribute (str): if provided, use the provided filter key
-            to select a subset of demonstration trajectories to load
-
-        dataset_path (str): if provided, the SequenceDataset instance should load
-            data from this dataset path. Defaults to config.train.data.
-
-    Returns:
-        dataset (SequenceDataset instance): dataset object
-    """
+    """Build datasets, including a force-validity mask for continuous CaMI."""
     if dataset_path is None:
         dataset_path = config.train.data
 
-    # NOTE: currently supporting fixed language embedding per dataset
-    ## that is fetched from dataset config and not from file
+    # Preserve the latest branch's fix: the caller reuses obs_keys.
+    # Construct a new list so training cannot alter validation inputs.
     if LangUtils.LANG_EMB_OBS_KEY in obs_keys:
-        obs_keys.remove(LangUtils.LANG_EMB_OBS_KEY)
-        ds_langs = [ds_cfg.get("lang", "dummy") for ds_cfg in config.train.data]
+        obs_keys = [key for key in obs_keys if key != LangUtils.LANG_EMB_OBS_KEY]
+        ds_langs = [entry.get("lang", "dummy") for entry in config.train.data]
     else:
         ds_langs = [None for _ in config.train.data]
 
@@ -174,12 +161,17 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         action_keys=config.train.action_keys,
         dataset_keys=config.train.dataset_keys,
         action_config=config.train.action_config,
-        load_next_obs=config.train.hdf5_load_next_obs, # whether to load next observations (s') from dataset
+        load_next_obs=config.train.hdf5_load_next_obs,
         frame_stack=config.train.frame_stack,
         seq_length=config.train.seq_length,
         pad_frame_stack=config.train.pad_frame_stack,
         pad_seq_length=config.train.pad_seq_length,
-        get_pad_mask=False,
+        # Repeated boundary samples must not enter the force distance.
+        # Other algorithms retain their existing loader behavior.
+        get_pad_mask=(
+            config.algo_name == "bc_cami"
+            and config.algo.cami.get("continuous_contact", {}).get("enabled", False)
+        ),
         goal_mode=config.train.goal_mode,
         hdf5_cache_mode=config.train.hdf5_cache_mode,
         hdf5_use_swmr=config.train.hdf5_use_swmr,
@@ -187,24 +179,25 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         filter_by_attribute=filter_by_attribute,
     )
 
-    ds_kwargs["hdf5_path"] = [ds_cfg["path"] for ds_cfg in config.train.data]
-    ds_kwargs["filter_by_attribute"] = [ds_cfg.get("filter_key", filter_by_attribute) for ds_cfg in config.train.data]
-    ds_kwargs["demo_limit"] = [ds_cfg.get("demo_limit", None) for ds_cfg in config.train.data]
-    ds_weights = [ds_cfg.get("weight", 1.0) for ds_cfg in config.train.data]
+    # Preserve per-dataset filters, limits, weights, and language settings.
+    ds_kwargs["hdf5_path"] = [entry["path"] for entry in config.train.data]
+    ds_kwargs["filter_by_attribute"] = [
+        entry.get("filter_key", filter_by_attribute) for entry in config.train.data
+    ]
+    ds_kwargs["demo_limit"] = [
+        entry.get("demo_limit", None) for entry in config.train.data
+    ]
+    ds_weights = [entry.get("weight", 1.0) for entry in config.train.data]
 
-    meta_ds_kwargs = dict()
-
-    dataset = get_dataset(
+    return get_dataset(
         ds_class=SequenceDataset,
         ds_kwargs=ds_kwargs,
         ds_weights=ds_weights,
         ds_langs=ds_langs,
         normalize_weights_by_ds_size=config.train.normalize_weights_by_ds_size,
         meta_ds_class=MetaDataset,
-        meta_ds_kwargs=meta_ds_kwargs,
+        meta_ds_kwargs={},
     )
-
-    return dataset
 
 
 def get_dataset(
@@ -311,28 +304,12 @@ def run_rollout(
 
     policy.start_episode()
 
+    # Use the observations supplied by the environment wrapper. CaMI's force
+    # sequences are privileged training data; its deployed policy, like the
+    # BC-RNN baseline, only needs the configured visual/proprioceptive inputs.
+    # Policies that explicitly use force must receive it from their wrapper.
     ob_dict = env.reset()
     goal_dict = None
-
-    # HOTFIX: ensure BC_CaMI-required force key survives rollout wrappers
-    if "force" not in ob_dict:
-        try:
-            base_env = env
-            while hasattr(base_env, "env"):
-                base_env = base_env.env
-
-            F_raw, T_raw = base_env._read_raw_ft_sensor()
-
-            if getattr(base_env, "_bias_F_sensor", None) is None:
-                base_env._bias_F_sensor = F_raw.copy()
-                base_env._bias_T_sensor = T_raw.copy()
-
-            F = F_raw - base_env._bias_F_sensor
-            T = T_raw - base_env._bias_T_sensor
-
-            ob_dict["force"] = (base_env.ft_scale * np.concatenate([F, T], axis=0)).astype(np.float32)
-        except Exception as e:
-            print("[ROLLOUT HOTFIX DEBUG] failed to inject reset force:", e)
 
     if use_goals:
         goal_dict = env.get_goal()
@@ -355,26 +332,6 @@ def run_rollout(
 
             # play action
             ob_dict, r, done, _ = env.step(ac)
-
-            # HOTFIX: ensure BC_CaMI-required force key survives rollout wrappers after each step
-            if "force" not in ob_dict:
-                try:
-                    base_env = env
-                    while hasattr(base_env, "env"):
-                        base_env = base_env.env
-
-                    F_raw, T_raw = base_env._read_raw_ft_sensor()
-
-                    if getattr(base_env, "_bias_F_sensor", None) is None:
-                        base_env._bias_F_sensor = F_raw.copy()
-                        base_env._bias_T_sensor = T_raw.copy()
-
-                    F = F_raw - base_env._bias_F_sensor
-                    T = T_raw - base_env._bias_T_sensor
-
-                    ob_dict["force"] = (base_env.ft_scale * np.concatenate([F, T], axis=0)).astype(np.float32)
-                except Exception as e:
-                    print("[ROLLOUT HOTFIX DEBUG] failed to inject step force:", e)
 
             # render to screen
             if render:
@@ -625,7 +582,7 @@ def should_save_from_rollout_logs(
     )
 
 
-def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=None, obs_normalization_stats=None, action_normalization_stats=None):
+def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=None, obs_normalization_stats=None, action_normalization_stats=None, verbose=True):
     """
     Save model to a torch pth file.
 
@@ -639,6 +596,8 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=No
         shape_meta (dict): shape metdata for this training run
 
         ckpt_path (str): writes model checkpoint to this path
+
+        verbose (bool): whether to print the saved checkpoint path
 
         variable_state (dict): internal variable state in main train loop, used for restoring training process
             from ckpt
@@ -671,10 +630,11 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=No
         action_normalization_stats = deepcopy(action_normalization_stats)
         params["action_normalization_stats"] = TensorUtils.to_list(action_normalization_stats)
     torch.save(params, ckpt_path)
-    print("save checkpoint to {}".format(ckpt_path))
+    if verbose:
+        print("save checkpoint to {}".format(ckpt_path))
 
 
-def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_normalization_stats=None):
+def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_normalization_stats=None, progress_desc=None):
     """
     Run an epoch of training or validation.
 
@@ -685,6 +645,8 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_nor
             to the model
 
         epoch (int): epoch number
+
+        progress_desc (str or None): optional label for the live batch progress bar
 
         validate (bool): whether this is a training epoch or validation epoch. This tells the model
             whether to do gradient steps or purely do forward passes.
@@ -712,7 +674,7 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_nor
     start_time = time.time()
 
     data_loader_iter = iter(data_loader)
-    for _ in LogUtils.custom_tqdm(range(num_steps)):
+    for _ in LogUtils.custom_tqdm(range(num_steps), desc=progress_desc):
 
         # load next batch from data loader
         try:

@@ -738,6 +738,23 @@ class RNNActorNetwork(RNN_MIMO_MLP):
                 msg="RNNActorNetwork: input_shape inconsistent in temporal dimension")
         return [T, self.ac_dim]
 
+    def forward_with_features(self, obs, goal=None, rnn_init_state=None,
+                              return_state=False, return_obs_encoding=False):
+        """Expose CaMI features while applying the same action squashing as rollout.
+
+        The optional observation encoding is computed in this same pass, so
+        LCP uses the exact image crop and proprioception that the policy saw.
+        """
+        if self._is_goal_conditioned:
+            assert goal is not None
+            time_steps = next(iter(obs.values())).shape[1]
+            goal = TensorUtils.unsqueeze_expand_at(goal, size=time_steps, dim=1)
+        result = super(RNNActorNetwork, self).forward_with_features(
+            obs=obs, goal=goal, rnn_init_state=rnn_init_state,
+            return_state=return_state, return_obs_encoding=return_obs_encoding,
+        )
+        return (torch.tanh(result[0]["action"]),) + result[1:]
+
     def forward(self, obs_dict, goal_dict=None, rnn_init_state=None, return_state=False):
         """
         Forward a sequence of inputs through the RNN and the per-step network.

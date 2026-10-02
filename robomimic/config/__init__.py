@@ -12,3 +12,5 @@ from robomimic.config.iris_config import IRISConfig
 from robomimic.config.td3_bc_config import TD3_BCConfig
 from robomimic.config.diffusion_policy_config import DiffusionPolicyConfig
 from robomimic.config.bc_cami_config import BCCaMIConfig
+from robomimic.config.bc_cami_lcp_v1_config import BCCaMILCPConfig
+from robomimic.config.bc_cami_lcp_v2_config import BCCaMICaNCEConfig

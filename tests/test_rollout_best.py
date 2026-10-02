@@ -116,6 +116,14 @@ def test_collect_export_and_video_encoding(tmp_path, monkeypatch, keep_failures,
     assert [r["seed"] for r in summary["episodes"]] == [10000, 10001, 10002]
     assert policy.episodes == 3 and env.closed
     assert len(list(output.glob("*.mp4"))) == expected_videos
+    # An episode is a rollout; "trial" now names a whole evaluation of many rollouts.
+    assert [r["rollout"] for r in summary["episodes"]] == [0, 1, 2]
+    assert all("trial" not in r for r in summary["episodes"])
+    names = {path.name for path in output.glob("*.mp4")}
+    assert "successful_rollout_000_seed_10000.mp4" in names
+    assert names == ({"successful_rollout_000_seed_10000.mp4", "failed_rollout_001_seed_10001.mp4",
+                      "errors_rollout_002_seed_10002.mp4"} if keep_failures
+                     else {"successful_rollout_000_seed_10000.mp4"})
     # Read real encoded videos, checking two camera views and final success frame.
     with imageio.get_reader(str(output / summary["episodes"][0]["video"])) as video:
         assert video.get_data(0).shape == (32, 64, 3)

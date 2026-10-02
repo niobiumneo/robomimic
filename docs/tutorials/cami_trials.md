@@ -1,8 +1,13 @@
-# Ten CaMI training runs and mean metrics
+# Train one CaMI model and evaluate its best checkpoint over repeated trials
+
+This follows `robomimic/scripts/run_trained_agent_multi_eval.py`: train **one**
+model, then evaluate its best checkpoint several times. A *rollout* is one
+episode. A *trial* is one evaluation of `--rollouts-per-trial` rollouts.
 
 Use the same environment and Hisham's robosuite fork that already run your
-single-seed CaMI training. The new launcher starts a fresh Python process for
-each seed, sequentially. No robosuite edits are required.
+single-seed CaMI training. The launcher starts a fresh Python process for the
+training run and for each trial, one after another. No robosuite edits are
+required.
 
 ## Run
 
@@ -14,124 +19,147 @@ python -m robomimic.scripts.train_trials \
   --config robomimic/exps/templates/bc_cami_square.json \
   --dataset dataset/square_image_84_with_force.hdf5 \
   --n-trials 10 \
+  --rollouts-per-trial 50 \
   --epochs 2000 \
-  --seed-start 1 \
-  --group square-cami-c-10-seeds \
+  --group square-cami-c \
   --wandb-project cami
 ```
 
-This starts seeds 1 through 10 with the same dataset, split, and hyperparameters.
-The Square template defines an epoch as 500 gradient steps. Each trial therefore
-performs 2,000 of those epochs. The launcher uses absolute output paths under
-`trained_models/square-cami-c-10-seeds/` by default.
+1. **Train one model** with the template's `train.seed` (1), or `--seed N`. The
+   Square template defines an epoch as 500 gradient steps, so this is 2,000
+   epochs of 500 steps. It evaluates 50 episodes every 50 epochs and at the
+   final epoch, and keeps best-success checkpoints. The template's periodic
+   checkpoints and rolling `last.pth`/`last_bak.pth` remain available.
+2. **Choose the checkpoint once.** It is the one with the highest recorded
+   training-evaluation success rate; ties prefer the earlier epoch. Every trial
+   evaluates these same weights, and the launcher stops if a trial reports any
+   others.
+3. **Run the trials.** Rollout *j* of trial *t* (both counted from 0) uses seed
+   `eval_seed + t * rollouts_per_trial + j`. With the defaults that is 10000 to
+   10499, all different, so no two rollouts share a start state and any one of
+   them can be reproduced. Python, NumPy, PyTorch, CUDA, and Hisham's robosuite
+   `default_rng` are seeded for each rollout. GPU kernels can still be
+   nondeterministic. Each trial saves every trajectory, videos of the
+   successful rollouts, and a summary.
+4. **Write the results:** per-epoch curves, trial and rollout CSVs, summary
+   statistics, a manifest, and the W&B runs.
 
-The template evaluates 50 episodes every 50 epochs, and the trainer also
-evaluates the final epoch. The launcher enables saving best-success checkpoints.
-The template's periodic checkpoints and rolling `last.pth`/`last_bak.pth` also
-remain available. Training checkpoint files are weights; rollout paths contain
-states, actions, rewards, and episode outcomes.
+Videos use `--camera-names` (default `agentview`) and `--video-skip 5` at
+`--fps` 4, which is close to natural speed at 20 Hz. Add `--keep-failures` to
+keep failure and simulator-error videos too. Trajectories of all rollouts are
+saved either way.
 
-After each training run, `rollout_best.py` selects the checkpoint with the highest
-**recorded training-evaluation success rate**. Ties prefer the earlier epoch.
-It evaluates that checkpoint on 50 fresh episodes, seeds 10000 through 10049,
-using the same seeds for every model. It saves all trajectories in `rollouts.hdf5`
-and saves successful videos. Add `--keep-failures` to keep failure/error videos,
-too. These are new evaluations of the best weights. They do not reconstruct
-the original training-evaluation paths, which the old training loop did not save.
+## Which numbers to report
 
-Python, NumPy, PyTorch, and Hisham's robosuite `default_rng` are seeded. GPU
-kernels can still be nondeterministic. Resuming uses the existing trainer's
-optimizer/checkpoint resume behavior; it does not restore the complete RNG state
-of an uninterrupted run.
+| Summary field | What it is |
+| --- | --- |
+| `Evaluation/Success_Rate` | Fresh evaluation of the selected checkpoint. Each trial contributes the mean of its own rollouts, including failures and simulator errors in the denominator. The statistics are over trials (n = number of trials), so selection of the checkpoint cannot inflate them. |
+| `Final/Rollout/Success_Rate/<dataset>/max` | The highest in-training success rate over the whole run. This is the "maximum success rate over training" metric that the robomimic study paper uses for baselines (see `docs/tutorials/viewing_results.md`). It is chosen from the same evaluations it is measured on, so it is optimistic. One value, n = 1. |
+| `BestCheckpoint/Rollout/Success_Rate/<dataset>` | In-training success at the selected epoch. Same optimism. n = 1. |
+
+Use the dataset key shown in your dashboard, for example
+`square_image_84_with_force`. `Final` and `BestCheckpoint` metrics are single
+measurements from the one training run, so their SD and SE are empty and n is 1.
+
+For ten finite trial measurements m_i, mean = sum(m_i)/10, sample
+SD = sqrt(sum((m_i - mean)^2)/9), and SE = SD/sqrt(10). Missing or non-finite
+values are excluded and the lower n stays visible.
+
+**What the spread means.** The trials repeat the evaluation of one trained
+model, so the SD shows how much the success rate moves with the start states.
+It does not include variation between training runs: another seed could give a
+different model. Treat a difference between two methods trained once each with
+that in mind. See "More seeds and the BC-RNN baseline" below.
+
+## How this differs from `run_trained_agent_multi_eval.py`
+
+- The CSV columns are the same, so `trial_results.csv` can be concatenated with
+  that script's output and read by `CAMI/cami_eval_plots_dist.py`.
+- That script seeds NumPy and PyTorch once per trial. Robomimic's environment
+  wrappers define no `seed()` method, so it cannot reseed a robosuite
+  `default_rng`. Here every rollout has its own seed and its own robosuite
+  generator state, so rollouts are reproducible one by one.
+- Trial and rollout numbers in `trial_results.csv` and `rollout_results.csv`
+  start at 1 for trials (matching the `trial_NN` folders) and 0 for rollouts
+  (matching `demo_N` in `rollouts.hdf5`). The within-trial `return_std` and
+  `horizon_std` are population SDs, as in that script. The across-trial SD in
+  the summary is the sample SD (n minus 1).
+- This launcher also trains the model, keeps all trajectories and success
+  videos, and writes a manifest and the W&B runs.
+
+To plot with Hisham's scripts, name the group like his model names, for example
+`square_100_percent_cami` and `square_100_percent_baseline`. The `model` column
+is the group name, and that script reads the method and data fraction from it.
 
 ## W&B
 
-There are ten `job_type=training` runs in the named group and one additional
-`job_type=aggregate` run named `square-cami-c-10-seeds-mean` after completion.
-Trial configs include `trial_seed`, `trial_index`, and `trial_group`.
+The group holds two runs:
 
-For a mean learning curve in the W&B workspace:
+- `<group>-train` (`job_type=training`): the trainer's per-epoch scalars with
+  x = epoch, including `Rollout/Success_Rate/<dataset>` and its `/mean`, `/max`,
+  `/min`, and `/std` variants. The config has `train_seed`. This is where the
+  per-epoch curves live.
+- `<group>-eval` (`job_type=evaluation`), created after the last trial: one
+  point per trial for each metric as `Trial/<metric>` (x = `trial`), the
+  fields `Summary/<scope>/<metric>/mean`, `/std`, `/se`, and `/n`, the tables
+  `metric_summary` and `trial_summary`, and an artifact with the CSV and JSON
+  results. Its config records the checkpoint, its epoch, and the training run's
+  ID.
 
-1. Filter to the named group and `job_type=training`.
-2. Set X to `epoch` and Y to a raw scalar metric, for example
-   `Rollout/Success_Rate/square_image_84_with_force`.
-3. Enable grouping by `group`, set aggregation to Mean, and set the shaded
-   range to Std Dev or Std Err. Turn off “Use only latest run per group”.
-
-Use the actual dataset key displayed in your dashboard. Existing metric suffixes
-such as `/mean` are running statistics *within one training run*. The raw
-`Rollout/Success_Rate/<dataset>` measures that epoch's evaluation success.
-
-The additional mean run logs every scalar metric captured by the trainer:
-
-| Prefix | Meaning |
+| Scope | Which value it uses |
 | --- | --- |
-| `Mean/<metric>` | Mean across available training seeds at that exact epoch |
-| `Std/<metric>` | Sample SD across seeds, denominator n minus 1 |
-| `SE/<metric>` | SD divided by sqrt(n) |
-| `N/<metric>` | Number of finite observations contributing to that point |
-
-Metrics are aligned by epoch without interpolation. Rollout statistics only
-exist at evaluation epochs. Non-finite/missing observations are excluded and
-their lower n remains visible. An incomplete planned trial stops the experiment;
-the launcher does not silently label a partial group a ten-run result.
-
-For ten finite measurements m_i, mean = sum(m_i)/10,
-sample SD = sqrt(sum((m_i - mean)^2)/9), and SE = SD/sqrt(10).
-
-The mean run also has `metric_summary` and `trial_summary` tables. Its summary
-fields use `Summary/<scope>/<metric>/mean`, `/std`, `/se`, and `/n`:
-
-| Scope | Which value each seed contributes |
-| --- | --- |
-| `Final` | Metric at epoch 2000 |
-| `BestCheckpoint` | Metric at that seed's selected checkpoint epoch |
-| `Evaluation` | Mean over the 50 fresh episodes of the selected checkpoint |
+| `Final` | Metric at the last epoch |
+| `BestCheckpoint` | Metric at the selected checkpoint's epoch |
+| `Evaluation` | Mean over each trial's rollouts; statistics over trials |
 | `Selection/Epoch` | Epoch of the selected checkpoint |
 
-For the best models' overall task performance, look at
-`Summary/Evaluation/Success_Rate/mean` and `/std`. Here n is 10 independently
-trained models. Each model contributes its own 50-episode mean, including failed
-episodes and simulator errors in the denominator. Those 500 episodes are not
-treated as 500 independent training trials. Training, BC/CaMI losses, rollout
-returns/success/horizon, timing, RAM, and other logged scalar metrics are captured
-automatically. Validation metrics are included if validation is enabled in the
-template. The current Square template has validation disabled.
+Results are written to CSV and JSON before W&B upload. No W&B history sampling is
+used to compute them.
 
 ## Saved outputs
 
 Under `trained_models/<group>/`:
 
-- `manifest.json`: seeds, trial status, chosen checkpoints, and evaluation paths.
-- `configs/`: the exact input config for each training seed.
-- `trials/trial_XX_seed_N/<timestamp>/`: checkpoints and scalar `logs/metrics.jsonl`.
-- `evaluations/trial_XX_seed_N/<timestamp>/`: HDF5 paths, videos, and episode summary.
-- `aggregate/curves.csv`: exact mean, sample SD, SE, and n for every metric and epoch.
-- `aggregate/summary.csv` and `summary.json`: final, selected-checkpoint, and fresh evaluation metrics.
+```text
+manifest.json                         seed, chosen checkpoint, status and results of every trial
+config.json                           the exact training config
+training/<group>-train/<timestamp>/   checkpoints, last.pth, logs/metrics.jsonl (exact per-epoch scalars)
+evaluations/trial_NN/<timestamp>/     rollouts.hdf5, summary.json, successful_rollout_*.mp4
+results/curves.csv                    epoch, metric, value (exact, nothing averaged)
+results/trial_results.csv             one row per trial (multi-eval columns)
+results/rollout_results.csv           one row per rollout, with its seed and outcome
+results/summary.csv, summary.json     mean, sample SD, SE, and n for every metric
+```
 
-CSV/JSON results are saved before W&B upload. The aggregate run also uploads
-these as an evaluation artifact. No W&B history sampling is used to compute them.
+`rollouts.hdf5` holds actions, rewards, dones, simulator states before and after
+each action, and model XML for every rollout. The masks `successful`, `failed`,
+and `errors` select outcomes. Replay them with
+`robomimic.scripts.playback_dataset --filter_key successful`; see
+`docs/tutorials/cami_wandb.md`.
 
-## Resume, repeat aggregation, or test briefly
+## Resume, rebuild, or test briefly
 
-If a trial fails, fix the cause and rerun the same training command with
-`--resume`. Completed trials are skipped. A trial with an existing `last.pth`
-resumes training. A trial whose training completed retries only its evaluation.
-The saved plan must match the resumed command. Each evaluation retry writes a
-new folder, preserving earlier files.
+If the training run or a trial fails, fix the cause and rerun the same command
+with `--resume`. Finished work is kept. An interrupted training run with a
+`last.pth` resumes with the trainer's optimizer and checkpoint resume (it does
+not restore the complete RNG state of an uninterrupted run), and the same W&B
+training run continues. A trial that failed is evaluated again into a new
+folder, so earlier files are preserved. The saved plan must match the resumed
+command. A manifest from the earlier ten-seed launcher is rejected; use a new
+`--group`.
 
-To regenerate or upload the completed group's mean without training again:
+To regenerate or upload the results of a completed group without running
+anything:
 
 ```bash
 python -m robomimic.scripts.train_trials \
-  --group square-cami-c-10-seeds \
+  --group square-cami-c \
   --aggregate-only \
   --wandb-project cami
 ```
 
-Use `--output-dir` again if you used a custom output directory. Aggregating
-again creates a separate W&B aggregate run; filter `job_type=training` when
-grouping the original ten learning curves.
+Use `--output-dir` again if you used a custom output directory. Uploading again
+creates a separate W&B evaluation run.
 
 A quick check of the actual dataset and simulation pipeline:
 
@@ -142,10 +170,22 @@ python -m robomimic.scripts.train_trials \
   --n-trials 2 --debug --group cami-smoke --wandb-project cami
 ```
 
-Debug uses two epochs, three gradient steps per epoch, and two short rollouts.
-Use a new group for the full experiment. For offline logging, add
+Debug uses two epochs, three gradient steps per epoch, and two short rollouts in
+each trial. Use a new group for the full experiment. For offline logging, add
 `--wandb-mode offline`, then use the usual `wandb sync` on the saved W&B folders.
 For local-only checks, add `--wandb-mode disabled`.
+
+## More seeds and the BC-RNN baseline
+
+Run the launcher again with another `--seed` and a new `--group` to add a
+training seed. Each group is a separate model, and the CSV files can be
+concatenated.
+
+For a baseline, run the plain BC-RNN config through the same launcher with the
+same `--eval-seed`. Both policies then start every rollout from the same seeds.
+No Square `bc` template is included. Copy `bc_cami_square.json`, set `algo_name`
+to `bc`, remove the `cami` block and the extra optimizers, and set
+`train.dataset_keys` to `["actions"]`, as `tests/test_rollout_best.py` does.
 
 ## Validation
 
@@ -153,11 +193,9 @@ For local-only checks, add `--wandb-mode disabled`.
 python -m unittest discover -s tests -p test_train_trials.py -v
 ```
 
-These checks exercise the ten independent 2,000-epoch job configurations with
-synthetic child outputs, exact statistics, failure handling/resume, stable RNG
-references, and W&B logging. They do not run neural-network training or MuJoCo.
-The existing `tests/test_rollout_best.py` covers real checkpoint restore and video
-export in an environment containing the full simulation/training dependencies.
-
-W&B grouping reference:
-https://docs.wandb.ai/models/app/features/panels/line-plot/reference
+These checks exercise the single training job and the repeated trials with
+synthetic child outputs: the shared checkpoint, disjoint seeds, exact
+statistics, failure and resume handling, the multi-eval CSV columns, and the W&B
+calls. They do not run neural-network training or MuJoCo. The existing
+`tests/test_rollout_best.py` covers real checkpoint restore and video export in
+an environment containing the full simulation and training dependencies.

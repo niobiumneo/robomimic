@@ -11,7 +11,6 @@ the performance of the weights in that file, so it must not rank last.pth.
 import argparse
 import json
 import random
-import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -23,60 +22,16 @@ import torch
 
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.torch_utils as TorchUtils
-from robomimic.utils.trial_metrics import describe, seed_environment
-
-
-def select_checkpoint(run_dir, metric_key=None):
-    """Find the best success-tagged checkpoint in one timestamped run.
-
-    An experiment directory selects its latest timestamped run, never a
-    mixture of runs. Multiple evaluation datasets require --metric-key.
-    Equal success rates prefer the earlier epoch, without a return tie-break.
-    """
-    run_dir = Path(run_dir).expanduser().resolve()
-    if run_dir.name == "models":
-        run_dir = run_dir.parent
-    if not (run_dir / "models").is_dir():
-        runs = sorted(p for p in run_dir.glob("*")
-                      if p.is_dir() and re.fullmatch(r"\d{14}", p.name)
-                      and (p / "models").is_dir())
-        if not runs:
-            raise ValueError("No timestamped training run found in {}".format(run_dir))
-        run_dir = runs[-1]
-
-    # Dataset keys can contain underscores. Parse return and success tags in
-    # order so a return tag never absorbs a preceding success tag.
-    pattern = re.compile(
-        r"_(?P<key>.+?)_(?P<kind>success|return)_(?P<rate>-?\d+(?:\.\d+)?)"
-        r"(?=_|$)"
-    )
-    candidates = []
-    for path in sorted((run_dir / "models").glob("model_epoch_*.pth")):
-        epoch_match = re.match(r"model_epoch_(\d+)", path.stem)
-        if epoch_match is None:
-            continue
-        suffix = path.stem[epoch_match.end():]
-        suffix = re.sub(r"^_best_validation_-?\d+(?:\.\d+)?(?:e[+-]?\d+)?", "", suffix)
-        for match in pattern.finditer(suffix):
-            if match["kind"] == "success":
-                candidates.append((match["key"], float(match["rate"]),
-                                   int(epoch_match[1]), path))
-    keys = sorted({key for key, _, _, _ in candidates})
-    if metric_key is None and len(keys) > 1:
-        raise ValueError("Multiple rollout metrics found; use --metric-key: {}".format(keys))
-    candidates = [c for c in candidates if metric_key is None or c[0] == metric_key]
-    if not candidates:
-        raise ValueError("No matching success-tagged checkpoint in {}. "
-                         "Wait for evaluation, or pass --checkpoint explicitly.".format(run_dir))
-    key, rate, epoch, path = max(candidates, key=lambda c: (c[1], -c[2]))
-    return path, {"metric_key": key, "training_success_rate": rate, "epoch": epoch}
+# select_checkpoint lives in the standard-library trial_metrics module so the
+# train_trials launcher can choose the checkpoint without importing torch.
+from robomimic.utils.trial_metrics import describe, seed_environment, select_checkpoint
 
 
 def collect_episode(policy, env, horizon, camera_names, video_skip, terminate_on_success=True):
     """Collect aligned pre-action states, post-action states, and video frames.
 
-    Reset recurrent policy state for each independent trial. Success uses the
-    environment's task criterion and stops the trial at its first success,
+    Reset recurrent policy state for each independent rollout. Success uses the
+    environment's task criterion and stops the rollout at its first success,
     matching the Square training template. No force injection is required.
     """
     policy.start_episode()
@@ -142,7 +97,11 @@ def save_trajectory(data, name, trajectory, initial_state, stats, seed):
 
 
 def run(args):
-    """Restore the policy once and run a fixed, reproducible trial budget."""
+    """Restore the policy once and run a fixed, reproducible rollout budget.
+
+    One call is one evaluation trial: --n-rollouts episodes of one checkpoint.
+    The train_trials launcher repeats it with disjoint seed ranges.
+    """
     selection = None
     if args.checkpoint:
         checkpoint = Path(args.checkpoint).expanduser().resolve(strict=True)
@@ -205,13 +164,13 @@ def run(args):
                 masks[status].append(name)
                 video = None
                 if frames and (stats["Success_Rate"] or args.keep_failures):
-                    video = "{}_trial_{:03d}_seed_{}.mp4".format(status, index, seed)
+                    video = "{}_rollout_{:03d}_seed_{}.mp4".format(status, index, seed)
                     # Encode after classification: unsuccessful frames need not
                     # create temporary videos that would then require deleting.
                     with imageio.get_writer(str(output / video), fps=args.fps) as writer:
                         for frame in frames:
                             writer.append_data(frame)
-                records.append(dict(stats, trial=index, seed=seed, status=status,
+                records.append(dict(stats, rollout=index, seed=seed, status=status,
                                     trajectory=name, video=video))
                 dataset.flush()
                 summary.update(n_rollouts_completed=len(records),
@@ -225,7 +184,7 @@ def run(args):
                                       for key in sorted(metric_keys)}
                 summary["metrics"]["Simulator_Error_Rate"] = len(masks["errors"]) / len(records)
                 (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-                print("Trial {}/{} | {} | steps={} | success so far={:.1%}".format(
+                print("Rollout {}/{} | {} | steps={} | success so far={:.1%}".format(
                     index + 1, args.n_rollouts, status, stats["Horizon"],
                     summary["success_rate"]), flush=True)
                 del frames
@@ -254,7 +213,7 @@ def main():
     parser.add_argument("--output-dir", help="New output directory; must not exist")
     parser.add_argument("--n-rollouts", type=int, default=50)
     parser.add_argument("--horizon", type=int, help="Default: checkpoint rollout horizon")
-    parser.add_argument("--seed", type=int, default=10000, help="Trial i uses seed+i")
+    parser.add_argument("--seed", type=int, default=10000, help="Rollout i uses seed+i")
     parser.add_argument("--camera-names", nargs="+", default=["agentview"])
     parser.add_argument("--video-skip", type=int, default=1)
     parser.add_argument("--fps", type=float, default=20, help="Use control_freq/video_skip for natural playback")

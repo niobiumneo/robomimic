@@ -80,11 +80,9 @@ class DataLogger(object):
                 config.meta.get("hp_keys") or [],
                 config.meta.get("hp_values") or [],
             ))
-            # Flat fields make trial filtering and grouping easy in the W&B UI.
-            wandb_config["trial_seed"] = config.train.seed
-            wandb_config["trial_group"] = os.environ.get("WANDB_RUN_GROUP")
-            if os.environ.get("CAMI_TRIAL_INDEX"):
-                wandb_config["trial_index"] = int(os.environ["CAMI_TRIAL_INDEX"])
+            # A flat field makes filtering by training seed easy in the W&B UI.
+            # The experiment group is passed to wandb.init below.
+            wandb_config["train_seed"] = config.train.seed
             try:
                 # W&B's quiet setting keeps warnings/errors, unlike silent=True.
                 # Print our own run URL below so it is always easy to find.

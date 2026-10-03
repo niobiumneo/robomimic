@@ -42,12 +42,53 @@ python -m robomimic.scripts.train_trials \
    nondeterministic. Each trial saves every trajectory, videos of the
    successful rollouts, and a summary.
 4. **Write the results:** per-epoch curves, trial and rollout CSVs, summary
-   statistics, a manifest, and the W&B runs.
+   statistics, a manifest, and the W&B runs. The evaluation run in W&B is
+   updated after each trial, so you can follow the trials as they finish.
 
-Videos use `--camera-names` (default `agentview`) and `--video-skip 5` at
-`--fps` 4, which is close to natural speed at 20 Hz. Add `--keep-failures` to
-keep failure and simulator-error videos too. Trajectories of all rollouts are
-saved either way.
+By default the videos use `--camera-names agentview` and `--video-skip 5` at
+`--fps 4`, which plays at natural speed for 20 Hz control. See "Videos" below
+for 60 fps, failure videos, and the joined `SUCCESSFUL_ALL.mp4` and
+`FAILED_ALL.mp4`. Trajectories of all rollouts are saved either way.
+
+## Videos
+
+Each successful rollout gets its own video, `successful_rollout_<NNN>_seed_<S>.mp4`.
+With `--keep-failures`, failed rollouts and simulator errors get one too
+(`failed_rollout_...`, `errors_rollout_...`). Each trial folder also has one
+video per outcome, made by joining those clips in rollout order:
+
+- `SUCCESSFUL_ALL.mp4`: every successful rollout of the trial.
+- `FAILED_ALL.mp4`: every failed rollout and simulator error of the trial. It
+  exists only when failure videos are kept.
+
+`SUCCESSFUL_ALL.csv` and `FAILED_ALL.csv` sit next to them. Each row gives the
+clip number, rollout, seed, outcome, file name, and the start time and duration of
+that clip in the joined video, so you can tell which rollout is on screen. The
+joined videos are the clips copied one after another without re-encoding, and
+the frame count of each is checked against its clips. If joining fails, a message
+is printed and the trial carries on with its individual videos. `--no-stitch`
+skips the joining; the joined videos take as much disk space as the clips
+themselves.
+
+For every control step at 60 fps, with failures kept:
+
+```bash
+python -m robomimic.scripts.train_trials \
+  ... \
+  --video-skip 1 --fps 60 --keep-failures
+```
+
+`--video-skip N` records every Nth control step and `--fps` is how fast the frames
+play back. The environment steps at 20 Hz and a frame is rendered after each
+step, so a video has at most 20 frames per simulated second. Playing every step at
+60 fps therefore runs **3 times faster than the simulation**; `--fps 20` plays it
+in real time, and the default `--video-skip 5 --fps 4` does too, with fewer
+frames. Each trial prints which one you have, for example `Videos: every 1
+control step(s) at 60 fps = 3x real time`. Rendering every step instead of every
+fifth takes noticeably longer per trial.
+
+Videos are settings of the experiment: a group that was started with other video
+options cannot be resumed with these (use a new `--group`).
 
 ## Evaluate a model you already have
 
@@ -77,8 +118,8 @@ Nothing is trained, so `--config`, `--dataset`, `--epochs`, `--seed`,
 `--rollouts`, and `--rollout-rate` are rejected, and `--wandb-project` is
 required unless you pass `--wandb-mode disabled` (there is no template to take
 it from). Everything else works as above: the same seed blocks and outputs,
-`--resume`, `--aggregate-only`, `--keep-failures`, `--camera-names`, and
-`--video-skip`. `--horizon N` overrides the horizon stored in the checkpoint
+`--resume`, `--aggregate-only`, `--keep-failures`, `--no-stitch`,
+`--camera-names`, `--video-skip`, and `--fps`. `--horizon N` overrides the horizon stored in the checkpoint
 (400 for Square, 700 for Tool Hang) for the trials only. The W&B group gets just
 the `<group>-eval` run, because no training run is created.
 
@@ -151,12 +192,22 @@ The group holds two runs:
   x = epoch, including `Rollout/Success_Rate/<dataset>` and its `/mean`, `/max`,
   `/min`, and `/std` variants. The config has `train_seed`. This is where the
   per-epoch curves live.
-- `<group>-eval` (`job_type=evaluation`), created after the last trial: one
-  point per trial for each metric as `Trial/<metric>` (x = `trial`), the
-  fields `Summary/<scope>/<metric>/mean`, `/std`, `/se`, and `/n`, the tables
+- `<group>-eval` (`job_type=evaluation`): opened before the first trial and
+  updated as each trial completes, with one point per trial for each metric as
+  `Trial/<metric>` (x = `trial`) and, beside it, `Running/<metric>/mean` and
+  `/se` over the trials so far, which shows the estimate settling as trials
+  come in. After the last trial it gets the fields
+  `Summary/<scope>/<metric>/mean`, `/std`, `/se`, and `/n`, the tables
   `metric_summary` and `trial_summary`, and an artifact with the CSV and JSON
-  results. Its config records the checkpoint, its epoch, and the training run's
-  ID.
+  results. Its config records the checkpoint, its epoch, the training run's ID,
+  and the video settings.
+
+The evaluation run's ID is kept in `manifest.json` (`wandb_eval_id`), so `--resume`
+continues the same run instead of starting another, and first logs any trial
+that was finished before W&B was following it. A trial that fails marks the run
+as failed until you resume. W&B problems never stop the evaluation: one warning
+is printed, the trials carry on, and the complete results are uploaded to a new
+run at the end. Videos are not uploaded; they stay in the evaluation folders.
 
 | Scope | Which value it uses |
 | --- | --- |
@@ -176,7 +227,8 @@ Under `trained_models/<group>/`:
 manifest.json                         seed, chosen checkpoint, status and results of every trial
 config.json                           the exact training config
 training/<group>-train/<timestamp>/   checkpoints, last.pth, logs/metrics.jsonl (exact per-epoch scalars)
-evaluations/trial_NN/<timestamp>/     rollouts.hdf5, summary.json, successful_rollout_*.mp4
+evaluations/trial_NN/<timestamp>/     rollouts.hdf5, summary.json, one video per kept rollout,
+                                      SUCCESSFUL_ALL.mp4/.csv, FAILED_ALL.mp4/.csv
 results/curves.csv                    epoch, metric, value (exact, nothing averaged)
 results/trial_results.csv             one row per trial (multi-eval columns)
 results/rollout_results.csv           one row per rollout, with its seed and outcome
@@ -201,7 +253,7 @@ If a trial fails again, the child's traceback is printed just above the
 "Stopped at" line. An interrupted training run with a
 `last.pth` resumes with the trainer's optimizer and checkpoint resume (it does
 not restore the complete RNG state of an uninterrupted run), and the same W&B
-training run continues. A trial that failed is evaluated again into a new
+training run continues, as does the evaluation run. A trial that failed is evaluated again into a new
 folder, so earlier files are preserved. The saved plan must match the resumed
 command. A manifest from the earlier ten-seed launcher is rejected; use a new
 `--group`.
@@ -217,7 +269,7 @@ python -m robomimic.scripts.train_trials \
 ```
 
 Use `--output-dir` again if you used a custom output directory. Uploading again
-creates a separate W&B evaluation run.
+creates a separate W&B evaluation run that holds every trial.
 
 A quick check of the actual dataset and simulation pipeline:
 
@@ -254,6 +306,9 @@ python -m unittest discover -s tests -p test_train_trials.py -v
 These checks exercise the single training job and the repeated trials with
 synthetic child outputs: the shared checkpoint, disjoint seeds, exact
 statistics, failure and resume handling, the multi-eval CSV columns, the W&B
-calls, and the evaluation of an existing checkpoint or run. They do not run neural-network training or MuJoCo. The existing
-`tests/test_rollout_best.py` covers real checkpoint restore and video export in
-an environment containing the full simulation and training dependencies.
+calls (including the live per-trial logging and its failure handling), and the
+evaluation of an existing checkpoint or run. They do not run neural-network
+training or MuJoCo. The existing `tests/test_rollout_best.py` covers real
+checkpoint restore and video export, including the 60 fps joined videos, which it
+encodes and decodes for real, in an environment containing the full simulation
+and training dependencies.

@@ -78,8 +78,10 @@ For online loss curves and rollout results, see the
 [CaMI W&B setup guide](docs/tutorials/cami_wandb.md).
 
 To train one model and evaluate its best checkpoint over repeated 50-episode
-trials, with trajectories, success videos, per-epoch curves, a manifest, and
-W&B logging, or to run those trials on a checkpoint you already have, see the
+trials, with trajectories, videos (one per rollout, plus one joined success and
+one joined failure video per trial), per-epoch curves, a manifest, and W&B
+logging that follows the trials as they finish, or to run those trials on a
+checkpoint you already have, see the
 [CaMI trial runner guide](docs/tutorials/cami_trials.md).
 
 Use [`rebuild_cami_dataset.py`](rebuild_cami_dataset.py) to replay Square and

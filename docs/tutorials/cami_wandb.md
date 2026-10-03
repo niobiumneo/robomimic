@@ -291,6 +291,9 @@ new folder under the run's `successful_rollouts/`:
 
 - `successful_rollout_...mp4`: one video per successful rollout. Add
   `--keep-failures` to also save `failed_rollout_...mp4` and `errors_rollout_...mp4`.
+- `SUCCESSFUL_ALL.mp4` and `FAILED_ALL.mp4`: those clips joined in rollout order,
+  one video per outcome (failures only with `--keep-failures`), each with a
+  `.csv` saying which rollout plays when. `--no-stitch` skips them.
 - `rollouts.hdf5`: all rollouts, with actions, rewards, dones, simulator states
   before and after each action, model XML, episode metadata, and success flags.
   Masks `successful`, `failed`, and `errors` select the outcomes.
@@ -308,7 +311,9 @@ W&B summary, use the [trial runner](cami_trials.md).
 
 The horizon defaults to the checkpoint setting (400 for full Square runs).
 Videos default to 20 fps with every step recorded, matching Square's 20 Hz.
-If using `--video-skip 5`, use `--fps 4` for approximately natural speed.
+If using `--video-skip 5`, use `--fps 4` for approximately natural speed. A
+higher `--fps` plays the same frames faster than the simulation: every step at
+`--fps 60` is 3 times real time, which the helper prints at the start.
 Simulator paths can be replayed without rerunning the policy:
 
 ```bash

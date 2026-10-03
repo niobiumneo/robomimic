@@ -13,8 +13,14 @@ or the best-success checkpoint of an existing run:
 
 This follows run_trained_agent_multi_eval.py: one trained model (a single
 training seed), whose best checkpoint is evaluated --n-trials times with
---rollouts-per-trial episodes each. Every trial's trajectories and success
-videos, the per-epoch curves, a resumable manifest, and W&B logs are kept.
+--rollouts-per-trial episodes each. Every trial's trajectories and videos (one
+per rollout, plus SUCCESSFUL_ALL.mp4 and FAILED_ALL.mp4 joining them), the
+per-epoch curves, a resumable manifest, and W&B logs are kept. The W&B
+evaluation run is updated as each trial finishes.
+
+For 60 fps videos of every step, failures included, add:
+    --video-skip 1 --fps 60 --keep-failures
+(every step at 60 fps plays 3x faster than the 20 Hz simulation.)
 """
 import argparse
 import copy
@@ -31,7 +37,7 @@ from datetime import datetime
 from pathlib import Path
 
 from robomimic.utils.trial_metrics import (
-    ROLLOUT_FIELDS, TRIAL_FIELDS, describe_checkpoint, read_history, rollout_rows,
+    ROLLOUT_FIELDS, TRIAL_FIELDS, describe, describe_checkpoint, read_history, rollout_rows,
     select_checkpoint, summarize, trial_rows)
 
 
@@ -103,6 +109,8 @@ def make_plan(args):
     # fingerprint they had before the option existed and can still be resumed.
     if args.horizon is not None:
         settings["horizon"] = args.horizon
+    if args.no_stitch:
+        settings["no_stitch"] = True
     # A changed execution mode is allowed on resume; the scientific settings stay fixed.
     fingerprint = copy.deepcopy(settings)
     fingerprint["config"]["experiment"]["logging"].pop("log_wandb", None)
@@ -137,6 +145,8 @@ def make_evaluation_plan(args):
                 "entity": args.wandb_entity}
     if horizon is not None:
         settings["horizon"] = horizon
+    if args.no_stitch:
+        settings["no_stitch"] = True
     signature = hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()
     return settings, signature
 
@@ -298,6 +308,8 @@ def evaluate_trial(entry, manifest, group_dir):
     command += ["--camera-names", *settings["camera_names"]]
     if settings["keep_failures"]:
         command.append("--keep-failures")
+    if settings.get("no_stitch"):
+        command.append("--no-stitch")
     env = os.environ.copy()
     # A model trained elsewhere has no training seed; any fixed value gives the same repeatability.
     hash_seed = training["seed"] if training["seed"] is not None else settings["eval_seed"]
@@ -341,7 +353,7 @@ def launch(args, group_dir):
         print("Group: {} | training seed {} for {} epochs | {} evaluation trials x {} rollouts | output: {}".format(
             args.group, training["seed"], settings["epochs"], settings["n_trials"],
             settings["rollouts_per_trial"], group_dir), flush=True)
-    active = None
+    active = tracker = None
     try:
         if not training["training_complete"]:
             active = training
@@ -349,20 +361,27 @@ def launch(args, group_dir):
         if "checkpoint" not in training:
             active = training
             choose_checkpoint(manifest, group_dir)
+        active = None
+        if any(entry["status"] != "complete" for entry in manifest["trials"]):
+            tracker = EvaluationTracker(args, manifest, group_dir)
         for entry in manifest["trials"]:
             if entry["status"] == "complete":
                 print("Skipping completed {}".format(entry["name"]), flush=True)
                 continue
             active = entry
             evaluate_trial(entry, manifest, group_dir)
+            active = None
+            tracker.log_trial(entry)
     except BaseException as exc:
         if active is not None:
             active.update(status="failed", error="{}: {}".format(type(exc).__name__, exc))
             write_json(manifest_path, manifest)
             print("Stopped at {}. Fix the error, then repeat this command with --resume.".format(
                 active["name"]), file=sys.stderr, flush=True)
+        if tracker is not None:
+            tracker.close(failed=True)
         raise
-    return manifest
+    return manifest, tracker
 
 
 def write_report(report, manifest, group_dir):
@@ -394,9 +413,24 @@ def print_summary(report, manifest):
     print(json.dumps(overview, indent=4), flush=True)
 
 
-def publish_report(report, manifest, result_dir, args):
-    if args.wandb_mode == "disabled":
-        return
+def evaluation_config(manifest):
+    """What the W&B evaluation run records about the model and the plan."""
+    settings, training = manifest["settings"], manifest["training"]
+    epochs = settings.get("epochs")
+    if epochs is None and training.get("history"):
+        try:
+            epochs = max(read_history(training["history"]))
+        except (OSError, ValueError):
+            pass
+    return {"n_trials": settings["n_trials"], "rollouts_per_trial": settings["rollouts_per_trial"],
+            "epochs": epochs, "std_ddof": 1, "training_seed": training["seed"],
+            "training_run_id": training["wandb_id"], "checkpoint": training["checkpoint"]["path"],
+            "checkpoint_epoch": training["checkpoint"]["epoch"], "eval_seed": settings["eval_seed"],
+            "video_skip": settings["video_skip"], "video_fps": settings["fps"]}
+
+
+def open_wandb_run(args, manifest, directory, run_id):
+    """Start the W&B evaluation run of this experiment, or continue it if @run_id already exists."""
     # An existing model has no training config to take the project from.
     config = manifest["settings"].get("config") or {}
     project = args.wandb_project or config.get("experiment", {}).get("logging", {}).get("wandb_proj_name")
@@ -407,24 +441,103 @@ def publish_report(report, manifest, result_dir, args):
     if Macros.WANDB_API_KEY is not None:
         os.environ.setdefault("WANDB_API_KEY", Macros.WANDB_API_KEY)
     entity = args.wandb_entity or os.environ.get("WANDB_ENTITY") or Macros.WANDB_ENTITY
-    training, selection = manifest["training"], report["selection"]
     # The evaluation run joins the training run's group but always has its own run ID.
     run = wandb.init(project=project, entity=entity, group=manifest["group"], job_type="evaluation",
-                     name=manifest["group"] + "-eval", id=uuid.uuid4().hex[:8], resume="never",
-                     mode=args.wandb_mode, dir=str(result_dir),
-                     config={"n_trials": report["n_trials"],
-                             "rollouts_per_trial": report["rollouts_per_trial"],
-                             "epochs": report["epochs"], "std_ddof": 1,
-                             "training_seed": training["seed"], "training_run_id": training["wandb_id"],
-                             "checkpoint": selection["path"], "checkpoint_epoch": selection["epoch"],
-                             "eval_seed": manifest["settings"]["eval_seed"]})
+                     name=manifest["group"] + "-eval", id=run_id, resume="allow",
+                     mode=args.wandb_mode, dir=str(directory), config=evaluation_config(manifest))
+    run.define_metric("trial")
+    run.define_metric("Trial/*", step_metric="trial")
+    run.define_metric("Running/*", step_metric="trial")
+    return run
+
+
+def trial_values(manifest, entry):
+    """What one finished trial adds to W&B: its metrics and the running mean/SE over the trials up to it."""
+    done = [trial for trial in manifest["trials"]
+            if trial["status"] == "complete" and trial["index"] <= entry["index"]]
+    values = {"trial": entry["index"]}
+    for key, value in entry["evaluation"]["metrics"].items():
+        if value is None:
+            continue
+        stats = describe([trial["evaluation"]["metrics"].get(key) for trial in done])
+        values["Trial/" + key] = value
+        values["Running/" + key + "/mean"] = stats["mean"]
+        if stats["se"] is not None:
+            values["Running/" + key + "/se"] = stats["se"]
+    return values
+
+
+class EvaluationTracker:
+    """The W&B run that follows the evaluation trials while they happen.
+
+    The run opens before the first trial that has still to run and gets each trial's
+    metrics as soon as that trial completes, with the mean and standard error over the
+    trials so far. Its ID is kept in the manifest, so --resume continues the same run and
+    first adds the trials an earlier invocation completed without logging.
+
+    Tracking is a convenience and must never cost an evaluation: if W&B fails, one warning
+    is printed and the evaluation carries on. publish_report then uploads everything to a
+    fresh run when the trials are done.
+    """
+
+    def __init__(self, args, manifest, group_dir):
+        self.manifest, self.manifest_path, self.run = manifest, group_dir / "manifest.json", None
+        if args.wandb_mode == "disabled":
+            return
+        try:
+            (group_dir / "results").mkdir(exist_ok=True)
+            if "wandb_eval_id" not in manifest:
+                manifest["wandb_eval_id"] = uuid.uuid4().hex[:8]
+                write_json(self.manifest_path, manifest)
+            self.run = open_wandb_run(args, manifest, group_dir / "results", manifest["wandb_eval_id"])
+            print("W&B evaluation run, updated after every trial: {}".format(self.run.url or self.run.id),
+                  flush=True)
+            for entry in manifest["trials"]:
+                if entry["status"] == "complete" and not entry.get("wandb_logged"):
+                    self.log_trial(entry)
+        except Exception as exc:
+            self.give_up(exc)
+
+    def log_trial(self, entry):
+        if self.run is None:
+            return
+        try:
+            self.run.log(trial_values(self.manifest, entry), step=entry["index"])
+            entry["wandb_logged"] = True
+            write_json(self.manifest_path, self.manifest)
+        except Exception as exc:
+            self.give_up(exc)
+
+    def give_up(self, exc):
+        print("W&B tracking of the trials stopped ({}: {}). The evaluation continues and the results "
+              "are uploaded in full when it ends.".format(type(exc).__name__, exc), file=sys.stderr, flush=True)
+        self.close()
+
+    def close(self, failed=False):
+        """Finish the live run; a failed evaluation marks it failed, and --resume continues it."""
+        run, self.run = self.run, None
+        if run is not None:
+            try:
+                run.finish(exit_code=1 if failed else 0)
+            except Exception as exc:
+                print("Could not close the W&B run ({}: {})".format(type(exc).__name__, exc),
+                      file=sys.stderr, flush=True)
+
+
+def publish_report(report, manifest, result_dir, args, tracker=None):
+    """Add the summary, tables and result files to W&B, in the live run if the trials were tracked in one.
+
+    Without a live run (--aggregate-only, or tracking stopped) a new run gets every trial first.
+    """
+    if args.wandb_mode == "disabled":
+        return
+    import wandb
+    live = tracker is not None and tracker.run is not None
+    run = tracker.run if live else open_wandb_run(args, manifest, result_dir, uuid.uuid4().hex[:8])
     try:
-        run.define_metric("trial")
-        run.define_metric("Trial/*", step_metric="trial")
-        for trial in report["trials"]:
-            values = {"Trial/" + key.split("/", 1)[1]: value
-                      for key, value in trial["metrics"].items() if value is not None}
-            run.log({"trial": trial["index"], **values}, step=trial["index"])
+        if not live:
+            for entry in manifest["trials"]:
+                run.log(trial_values(manifest, entry), step=entry["index"])
         run.summary.update({"Summary/" + key + "/" + stat: value
                             for key, stats in report["summary"].items()
                             for stat, value in stats.items() if value is not None})
@@ -442,6 +555,8 @@ def publish_report(report, manifest, result_dir, args):
         print("W&B evaluation run: {}".format(run.url or run.id), flush=True)
     finally:
         run.finish()
+        if live:
+            tracker.run = None
 
 
 def run(args):
@@ -449,23 +564,28 @@ def run(args):
     if Path(args.group).name != args.group or args.group in (".", ".."):
         raise ValueError("Group must be a folder name without path separators")
     group_dir = Path(args.output_dir).expanduser().resolve() / args.group
-    manifest = load_manifest(group_dir) if args.aggregate_only else launch(args, group_dir)
-    training, settings = manifest["training"], manifest["settings"]
-    if (training["status"] not in ("trained", "external") or not manifest["trials"]
-            or any(trial["status"] != "complete" for trial in manifest["trials"])):
-        raise ValueError("Complete training and every evaluation trial before summarizing the experiment")
-    history = read_history(training["history"]) if training.get("history") else None
-    # A model trained elsewhere reports through the last epoch its journal recorded.
-    epochs = settings["epochs"] if settings.get("mode") != "evaluate" else (max(history) if history else None)
-    report = summarize(history, epochs, training["checkpoint"], manifest["trials"])
-    result_dir = write_report(report, manifest, group_dir)
-    if settings.get("mode") == "evaluate":
-        done = "{} evaluation trials complete. Trial results and statistics saved in {}"
-    else:
-        done = "Training and {} evaluation trials complete. Curves, trial results and statistics saved in {}"
-    print(done.format(report["n_trials"], result_dir), flush=True)
-    print_summary(report, manifest)
-    publish_report(report, manifest, result_dir, args)
+    manifest, tracker = (load_manifest(group_dir), None) if args.aggregate_only else launch(args, group_dir)
+    try:
+        training, settings = manifest["training"], manifest["settings"]
+        if (training["status"] not in ("trained", "external") or not manifest["trials"]
+                or any(trial["status"] != "complete" for trial in manifest["trials"])):
+            raise ValueError("Complete training and every evaluation trial before summarizing the experiment")
+        history = read_history(training["history"]) if training.get("history") else None
+        # A model trained elsewhere reports through the last epoch its journal recorded.
+        epochs = settings["epochs"] if settings.get("mode") != "evaluate" else (max(history) if history else None)
+        report = summarize(history, epochs, training["checkpoint"], manifest["trials"])
+        result_dir = write_report(report, manifest, group_dir)
+        if settings.get("mode") == "evaluate":
+            done = "{} evaluation trials complete. Trial results and statistics saved in {}"
+        else:
+            done = "Training and {} evaluation trials complete. Curves, trial results and statistics saved in {}"
+        print(done.format(report["n_trials"], result_dir), flush=True)
+        print_summary(report, manifest)
+        publish_report(report, manifest, result_dir, args, tracker)
+    except BaseException:
+        if tracker is not None:
+            tracker.close(failed=True)
+        raise
     return report
 
 
@@ -494,8 +614,15 @@ def main():
     parser.add_argument("--metric-key", help="Dataset key for best success checkpoint selection")
     parser.add_argument("--camera-names", nargs="+", default=["agentview"])
     parser.add_argument("--video-skip", type=int, default=5)
-    parser.add_argument("--fps", type=float, help="Video frame rate (default: 20/video-skip)")
-    parser.add_argument("--keep-failures", action="store_true", help="Keep failure/error videos, too; all paths are always kept")
+    parser.add_argument("--fps", type=float,
+                        help="Video playback rate (default: 20/video-skip, which is real time at 20 Hz control). "
+                             "--video-skip 1 --fps 60 records every step and plays 3x faster than real time")
+    parser.add_argument("--keep-failures", action="store_true",
+                        help="Keep a video of each failed or errored rollout, too, and join them into FAILED_ALL.mp4; "
+                             "all trajectories are always kept")
+    parser.add_argument("--no-stitch", action="store_true",
+                        help="Keep only the individual videos: do not also join each trial's clips into "
+                             "SUCCESSFUL_ALL.mp4 and FAILED_ALL.mp4")
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-entity")
     parser.add_argument("--wandb-mode", choices=["online", "offline", "disabled"], default=os.environ.get("WANDB_MODE", "online"))

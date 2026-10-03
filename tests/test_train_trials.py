@@ -68,7 +68,7 @@ class LauncherTests(unittest.TestCase):
                       n_trials=10, rollouts_per_trial=50, eval_seed=10000, group="test-group",
                       output_dir=str(self.root / "outputs"), rollouts=None, rollout_rate=None,
                       metric_key=None, camera_names=["agentview"], video_skip=5, fps=None,
-                      keep_failures=False, wandb_project="cami-test", wandb_entity=None,
+                      keep_failures=False, no_stitch=False, wandb_project="cami-test", wandb_entity=None,
                       wandb_mode="disabled", resume=False, aggregate_only=False, debug=False,
                       checkpoint=None, run_dir=None, horizon=None)
         values.update(changes)
@@ -351,16 +351,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_online_run_publishes_one_evaluation_run_with_per_trial_values(self):
         fake = FakeRun()
-
-        class Artifact:
-            def __init__(self, *args, **kwargs):
-                self.paths = []
-
-            def add_file(self, path):
-                self.paths.append(path)
-
-        wandb = types.SimpleNamespace(init=mock.Mock(return_value=fake), Artifact=Artifact,
-                                      Table=lambda **kwargs: types.SimpleNamespace(**kwargs))
+        wandb = fake_wandb(fake)
         with mock.patch.dict(sys.modules, {"wandb": wandb}), \
              mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
             train_trials.run(self.args(wandb_mode="online", wandb_project=None))
@@ -369,11 +360,14 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(wandb.init.call_count, 1)
         self.assertEqual((kwargs["group"], kwargs["job_type"], kwargs["name"]),
                          ("test-group", "evaluation", "test-group-eval"))
-        self.assertEqual(kwargs["resume"], "never")
+        # The run has its own ID, kept in the manifest so that --resume continues it.
+        self.assertEqual((kwargs["id"], kwargs["resume"]), (manifest["wandb_eval_id"], "allow"))
+        self.assertNotEqual(kwargs["id"], manifest["training"]["wandb_id"])
         self.assertEqual(kwargs["project"], "cami")
         self.assertEqual(kwargs["config"]["training_seed"], 1)
         self.assertEqual(kwargs["config"]["checkpoint_epoch"], 100)
         self.assertEqual(kwargs["config"]["training_run_id"], manifest["training"]["wandb_id"])
+        self.assertEqual((kwargs["config"]["video_skip"], kwargs["config"]["video_fps"]), (5, 4.0))
         for index, (values, options) in enumerate(fake.rows[:10], 1):
             self.assertEqual(values["trial"], index)
             self.assertAlmostEqual(values["Trial/Success_Rate"], (25 + index) / 50)
@@ -565,16 +559,7 @@ class LauncherTests(unittest.TestCase):
     def test_online_evaluation_of_an_existing_model_creates_no_training_run(self):
         run_dir = self.make_run()
         fake = FakeRun()
-
-        class Artifact:
-            def __init__(self, *args, **kwargs):
-                self.paths = []
-
-            def add_file(self, path):
-                self.paths.append(path)
-
-        wandb = types.SimpleNamespace(init=mock.Mock(return_value=fake), Artifact=Artifact,
-                                      Table=lambda **kwargs: types.SimpleNamespace(**kwargs))
+        wandb = fake_wandb(fake)
         with mock.patch.dict(sys.modules, {"wandb": wandb}), \
              mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
             train_trials.run(self.evaluation_args(run_dir=str(run_dir), n_trials=2, wandb_mode="online",
@@ -588,6 +573,242 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(kwargs["config"]["checkpoint_epoch"], 100)
         self.assertEqual(self.commands("train"), [])
         self.assertTrue(fake.finished)
+
+    # --- W&B follows the trials while they run ---------------------------------------------
+
+    RATES = [(25 + index) / 50 for index in (1, 2, 3)]  # what trials 1, 2 and 3 of the fake child score
+
+    def online(self, wandb, **changes):
+        """Run the launcher against a fake wandb module; returns the error output."""
+        stderr = io.StringIO()
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=self.child), \
+             contextlib.redirect_stderr(stderr):
+            train_trials.run(self.args(wandb_mode="online", **changes))
+        return stderr.getvalue()
+
+    def manifest(self):
+        return json.loads((self.group_dir / "manifest.json").read_text())
+
+    def test_each_trial_reaches_wandb_before_the_next_one_starts(self):
+        fake = FakeRun()
+        wandb = fake_wandb(fake)
+        seen = []
+
+        def child(command, cwd, env, check):
+            if command[2] == "robomimic.scripts.rollout_best":
+                seen.append(len(fake.rows))  # what W&B already holds when this trial begins
+            self.child(command, cwd, env, check)
+
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=child):
+            train_trials.run(self.args(n_trials=3, wandb_mode="online"))
+        self.assertEqual(seen, [0, 1, 2])
+        self.assertEqual(wandb.init.call_count, 1)
+        manifest = self.manifest()
+        self.assertEqual([trial["wandb_logged"] for trial in manifest["trials"]], [True] * 3)
+        for index, (values, options) in enumerate(fake.rows[:3], 1):
+            self.assertEqual(options, {"step": index})
+            self.assertEqual(values["trial"], index)
+            self.assertAlmostEqual(values["Trial/Success_Rate"], self.RATES[index - 1])
+            # The running statistics use only the trials up to this one.
+            self.assertAlmostEqual(values["Running/Success_Rate/mean"], statistics.fmean(self.RATES[:index]))
+        self.assertNotIn("Running/Success_Rate/se", fake.rows[0][0])
+        self.assertAlmostEqual(fake.rows[2][0]["Running/Success_Rate/se"],
+                               statistics.stdev(self.RATES) / math.sqrt(3))
+        # The curves are plotted against the trial number, and the summary closes the same run.
+        self.assertIn(("Running/*", {"step_metric": "trial"}), fake.definitions)
+        self.assertEqual(set(fake.rows[3][0]), {"metric_summary", "trial_summary"})
+        self.assertEqual(fake.rows[3][1], {"step": 4})
+        self.assertEqual((fake.finished, fake.exit_code), (True, None))
+
+    def test_a_stopped_evaluation_marks_its_run_failed_and_resume_continues_it(self):
+        first, second = FakeRun(), FakeRun()
+        wandb = fake_wandb(first, second)
+        self.fail_trial_once = 2
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            with self.assertRaises(subprocess.CalledProcessError):
+                train_trials.run(self.args(n_trials=3, wandb_mode="online"))
+            self.assertEqual(first.trials(), [1])
+            self.assertEqual((first.finished, first.exit_code), (True, 1))
+            self.assertEqual([trial.get("wandb_logged") for trial in self.manifest()["trials"]],
+                             [True, None, None])
+            train_trials.run(self.args(n_trials=3, wandb_mode="online", resume=True))
+        # The same run again, now only with the trials that were still missing.
+        ids = [call.kwargs["id"] for call in wandb.init.call_args_list]
+        self.assertEqual(ids, [self.manifest()["wandb_eval_id"]] * 2)
+        self.assertEqual(second.trials(), [2, 3])
+        self.assertAlmostEqual(second.rows[0][0]["Running/Success_Rate/mean"], statistics.fmean(self.RATES[:2]))
+        self.assertEqual(second.rows[-1][1], {"step": 4})
+        self.assertEqual((second.finished, second.exit_code), (True, None))
+
+    def test_trials_finished_before_tracking_began_are_added_first(self):
+        # An experiment started with W&B off, or by a version that logged only at the end.
+        self.fail_trial_once = 3
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            with self.assertRaises(subprocess.CalledProcessError):
+                train_trials.run(self.args(n_trials=3))
+        self.assertNotIn("wandb_eval_id", self.manifest())
+        fake = FakeRun()
+        self.online(fake_wandb(fake), n_trials=3, resume=True)
+        self.assertEqual(fake.trials(), [1, 2, 3])
+        self.assertEqual([options["step"] for _, options in fake.rows[:3]], [1, 2, 3])
+        self.assertEqual([trial["wandb_logged"] for trial in self.manifest()["trials"]], [True] * 3)
+        # Trials 1 and 2 were both finished already, but each row still describes only the trials up to it.
+        self.assertAlmostEqual(fake.rows[0][0]["Running/Success_Rate/mean"], self.RATES[0])
+        self.assertAlmostEqual(fake.rows[1][0]["Running/Success_Rate/mean"], statistics.fmean(self.RATES[:2]))
+
+    def test_a_wandb_failure_when_the_run_opens_does_not_stop_the_evaluation(self):
+        fake = FakeRun()
+        wandb = fake_wandb(RuntimeError("no network"), fake)
+        error = self.online(wandb, n_trials=2)
+        self.assertIn("W&B tracking of the trials stopped (RuntimeError: no network)", error)
+        self.assertEqual([trial["status"] for trial in self.manifest()["trials"]], ["complete"] * 2)
+        # The results still reach W&B, in full, when the trials are done.
+        self.assertEqual(wandb.init.call_count, 2)
+        self.assertEqual(fake.trials(), [1, 2])
+        self.assertEqual(set(fake.rows[2][0]), {"metric_summary", "trial_summary"})
+        self.assertTrue(fake.finished)
+
+    def test_a_wandb_failure_while_logging_does_not_stop_the_evaluation(self):
+        class LosesConnection(FakeRun):
+            def log(self, values, **kwargs):
+                if values.get("trial") == 2:
+                    raise ConnectionError("lost")
+                super().log(values, **kwargs)
+
+        first, second = LosesConnection(), FakeRun()
+        wandb = fake_wandb(first, second)
+        error = self.online(wandb, n_trials=3)
+        self.assertIn("W&B tracking of the trials stopped (ConnectionError: lost)", error)
+        self.assertEqual(self.calls and len(self.commands("rollout_best")), 3)
+        self.assertEqual(first.trials(), [1])
+        self.assertTrue(first.finished)
+        # Tracking is not retried for later trials; the full upload at the end covers everything.
+        self.assertEqual(wandb.init.call_count, 2)
+        self.assertEqual(second.trials(), [1, 2, 3])
+        self.assertNotEqual(wandb.init.call_args_list[0].kwargs["id"], wandb.init.call_args_list[1].kwargs["id"])
+        self.assertEqual([trial.get("wandb_logged") for trial in self.manifest()["trials"]], [True, None, None])
+
+    def test_an_interrupt_while_logging_a_finished_trial_does_not_blame_the_trial(self):
+        class Interrupted(FakeRun):
+            def log(self, values, **kwargs):
+                if values.get("trial") == 2:
+                    raise KeyboardInterrupt
+                super().log(values, **kwargs)
+
+        first, second = Interrupted(), FakeRun()
+        wandb = fake_wandb(first, second)
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            with self.assertRaises(KeyboardInterrupt):
+                train_trials.run(self.args(n_trials=3, wandb_mode="online"))
+            # The trial itself finished, so it is not repeated; only its W&B row is missing.
+            trials = self.manifest()["trials"]
+            self.assertEqual([trial["status"] for trial in trials], ["complete", "complete", "pending"])
+            self.assertNotIn("error", trials[1])
+            self.assertEqual((first.finished, first.exit_code), (True, 1))
+            self.calls.clear()
+            train_trials.run(self.args(n_trials=3, wandb_mode="online", resume=True))
+        self.assertEqual([int(c[c.index("--seed") + 1]) for c in self.commands("rollout_best")], [10100])
+        self.assertEqual(second.trials(), [2, 3])
+
+    def test_an_error_after_the_trials_marks_the_live_run_failed(self):
+        fake = FakeRun()
+        wandb = fake_wandb(fake)
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=self.child), \
+             mock.patch.object(train_trials, "summarize", side_effect=ValueError("boom")):
+            with self.assertRaisesRegex(ValueError, "boom"):
+                train_trials.run(self.args(n_trials=2, wandb_mode="online"))
+        self.assertEqual(fake.trials(), [1, 2])
+        self.assertEqual((fake.finished, fake.exit_code), (True, 1))
+
+    def test_a_missing_wandb_project_is_reported_when_uploading_not_during_the_evaluation(self):
+        # A template without a project name, and no --wandb-project.
+        template = json.loads(self.config.read_text())
+        template["experiment"]["logging"]["wandb_proj_name"] = None
+        self.config.write_text(json.dumps(template))
+        wandb = fake_wandb()
+        stderr = io.StringIO()
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=self.child), \
+             contextlib.redirect_stderr(stderr):
+            with self.assertRaisesRegex(ValueError, "Set --wandb-project"):
+                train_trials.run(self.args(n_trials=2, wandb_mode="online", wandb_project=None))
+        self.assertIn("W&B tracking of the trials stopped (ValueError: Set --wandb-project", stderr.getvalue())
+        # Both trials ran and their results are on disk; only the upload could not happen.
+        self.assertEqual([trial["status"] for trial in self.manifest()["trials"]], ["complete"] * 2)
+        self.assertTrue((self.group_dir / "results/summary.json").is_file())
+        wandb.init.assert_not_called()
+
+    def test_aggregating_a_finished_experiment_uploads_every_trial_to_a_new_run(self):
+        live, rebuilt = FakeRun(), FakeRun()
+        wandb = fake_wandb(live, rebuilt)
+        self.online(wandb, n_trials=2)
+        self.assertEqual(live.trials(), [1, 2])
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run") as child:
+            train_trials.run(self.args(n_trials=2, wandb_mode="online", aggregate_only=True, config=None))
+            child.assert_not_called()
+        self.assertNotEqual(wandb.init.call_args_list[0].kwargs["id"], wandb.init.call_args_list[1].kwargs["id"])
+        self.assertEqual(rebuilt.trials(), [1, 2])
+        self.assertEqual([options["step"] for _, options in rebuilt.rows[:2]], [1, 2])
+        self.assertEqual(rebuilt.rows[2][1], {"step": 3})
+        # The live run's own record is untouched.
+        self.assertEqual([trial["wandb_logged"] for trial in self.manifest()["trials"]], [True, True])
+
+    def test_nothing_is_opened_when_every_trial_is_already_complete(self):
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(self.args(n_trials=2))
+        fake = FakeRun()
+        wandb = fake_wandb(fake)
+        with mock.patch.dict(sys.modules, {"wandb": wandb}), \
+             mock.patch.object(train_trials.subprocess, "run") as child:
+            train_trials.run(self.args(n_trials=2, wandb_mode="online", resume=True))
+            child.assert_not_called()
+        self.assertEqual(wandb.init.call_count, 1)  # only the upload of the finished results
+        self.assertEqual(fake.trials(), [1, 2])
+
+    def test_disabled_tracking_creates_no_results_folder_before_the_report(self):
+        sdk = types.SimpleNamespace(init=mock.Mock())
+        self.fail_trial_once = 2
+        with mock.patch.dict(sys.modules, {"wandb": sdk}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            with self.assertRaises(subprocess.CalledProcessError):
+                train_trials.run(self.args(n_trials=2, wandb_mode="disabled"))
+        sdk.init.assert_not_called()
+        self.assertFalse((self.group_dir / "results").exists())
+        self.assertNotIn("wandb_eval_id", self.manifest())
+
+    # --- videos ---------------------------------------------------------------------------------
+
+    def test_video_options_reach_the_rollouts(self):
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(self.args(n_trials=1, video_skip=1, fps=60.0, keep_failures=True))
+        command = self.commands("rollout_best")[0]
+        self.assertEqual((command[command.index("--video-skip") + 1], command[command.index("--fps") + 1]),
+                         ("1", "60.0"))
+        self.assertIn("--keep-failures", command)
+        self.assertNotIn("--no-stitch", command)
+        self.assertEqual(self.manifest()["settings"]["fps"], 60.0)
+
+    def test_stitching_is_on_unless_turned_off_and_changing_it_is_a_new_plan(self):
+        settings, signature = train_trials.make_plan(self.args())
+        self.assertNotIn("no_stitch", settings)  # plans made before the option keep their fingerprint
+        off, off_signature = train_trials.make_plan(self.args(no_stitch=True))
+        self.assertTrue(off["no_stitch"])
+        self.assertNotEqual(signature, off_signature)
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(self.args(n_trials=1, no_stitch=True))
+        self.assertIn("--no-stitch", self.commands("rollout_best")[0])
+        with self.assertRaisesRegex(ValueError, "Resume settings differ"):
+            train_trials.run(self.args(n_trials=1, resume=True))
+        run_dir = self.make_run()
+        evaluation, _ = train_trials.make_plan(self.evaluation_args(run_dir=str(run_dir), no_stitch=True))
+        self.assertTrue(evaluation["no_stitch"])
+        self.assertNotIn("no_stitch", train_trials.make_plan(self.evaluation_args(run_dir=str(run_dir)))[0])
 
     def test_horizon_override_reaches_the_rollouts_only_when_given(self):
         run_dir = self.make_run()
@@ -636,6 +857,18 @@ class LauncherTests(unittest.TestCase):
                 train_trials.main()
         # Training still defaults to 2000 epochs.
         self.assertEqual(parse("--config", str(self.config)).epochs, 2000)
+
+    def test_command_line_video_options(self):
+        def parse(*argv):
+            with mock.patch.object(train_trials, "run") as launcher, \
+                 mock.patch.object(sys, "argv", ["train_trials", "--config", str(self.config), *argv]):
+                train_trials.main()
+            return launcher.call_args.args[0]
+
+        args = parse()
+        self.assertEqual((args.video_skip, args.fps, args.keep_failures, args.no_stitch), (5, None, False, False))
+        args = parse("--video-skip", "1", "--fps", "60", "--keep-failures", "--no-stitch")
+        self.assertEqual((args.video_skip, args.fps, args.keep_failures, args.no_stitch), (1, 60.0, True, True))
 
 
 class MetricTests(unittest.TestCase):
@@ -737,7 +970,7 @@ class FakeRun:
     def __init__(self):
         self.id, self.url, self.offline = "fake-run", "https://example.invalid/test", False
         self.rows, self.definitions, self.summary = [], [], {}
-        self.finished = False
+        self.finished, self.exit_code = False, None
 
     def log(self, values, **kwargs):
         self.rows.append((values, kwargs))
@@ -745,11 +978,29 @@ class FakeRun:
     def define_metric(self, name, **kwargs):
         self.definitions.append((name, kwargs))
 
-    def finish(self):
-        self.finished = True
+    def finish(self, exit_code=None):
+        self.finished, self.exit_code = True, exit_code
 
     def log_artifact(self, artifact):
         self.artifact = artifact
+
+    def trials(self):
+        """The trial numbers that were logged, in order."""
+        return [values["trial"] for values, _ in self.rows if "trial" in values]
+
+
+class FakeArtifact:
+    def __init__(self, *args, **kwargs):
+        self.paths = []
+
+    def add_file(self, path):
+        self.paths.append(path)
+
+
+def fake_wandb(*runs):
+    """A stand-in for the wandb module: each init call returns the next run (an exception is raised)."""
+    return types.SimpleNamespace(init=mock.Mock(side_effect=list(runs)), Artifact=FakeArtifact,
+                                 Table=lambda **kwargs: types.SimpleNamespace(**kwargs))
 
 
 class LoggingTests(unittest.TestCase):

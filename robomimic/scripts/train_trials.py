@@ -160,6 +160,10 @@ def training_directory(experiment_dir):
 
 def load_manifest(group_dir):
     path = Path(group_dir) / "manifest.json"
+    if not path.is_file():
+        raise ValueError("No manifest.json in {}. Check --group and --output-dir. A folder left by a run "
+                         "that stopped before writing one has nothing to resume and can be deleted.".format(
+                             group_dir))
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if manifest.get("version") != MANIFEST_VERSION:
         raise ValueError("{} was written by the earlier ten-seed launcher; "
@@ -198,10 +202,16 @@ def external_training(settings):
 
 
 def new_manifest(args, group_dir, settings, signature):
-    group_dir.mkdir(parents=True, exist_ok=False)
-    if settings.get("mode") == "evaluate":
-        training = external_training(settings)
-    else:
+    evaluating = settings.get("mode") == "evaluate"
+    # Read the model's journal before creating anything, so a failure here leaves no empty group folder.
+    training = external_training(settings) if evaluating else None
+    try:
+        group_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        raise ValueError("{} already exists. To continue that experiment, repeat the same command with "
+                         "--resume. To start over, choose another --group or delete that folder.".format(
+                             group_dir)) from None
+    if not evaluating:
         config = copy.deepcopy(settings["config"])
         name = args.group + "-train"
         config["train"].update(seed=settings["seed"], num_epochs=settings["epochs"],

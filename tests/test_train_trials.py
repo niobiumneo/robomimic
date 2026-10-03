@@ -508,6 +508,51 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No timestamped training run"):
             train_trials.make_plan(self.evaluation_args(run_dir=str(self.root)))
 
+    def check_second_run_is_refused(self, make_args):
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(make_args())
+        manifest_before = (self.group_dir / "manifest.json").read_text()
+        self.calls.clear()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            with self.assertRaisesRegex(ValueError, "test-group already exists.*--resume.*another --group"):
+                train_trials.run(make_args())
+        self.assertEqual(self.calls, [])
+        self.assertEqual((self.group_dir / "manifest.json").read_text(), manifest_before)
+
+    def test_repeating_an_evaluation_command_says_to_resume_or_pick_another_group(self):
+        run_dir = self.make_run()
+        self.check_second_run_is_refused(lambda: self.evaluation_args(run_dir=str(run_dir), n_trials=1))
+
+    def test_repeating_a_training_command_says_to_resume_or_pick_another_group(self):
+        self.check_second_run_is_refused(lambda: self.args(n_trials=1))
+
+    def test_resume_or_summary_without_a_manifest_explains_itself(self):
+        run_dir = self.make_run()
+        for folder_exists in (False, True):
+            if folder_exists:
+                self.group_dir.mkdir(parents=True)  # what a run that stopped early could leave
+            for changes in (dict(resume=True), dict(aggregate_only=True)):
+                with self.subTest(folder_exists=folder_exists, **changes):
+                    with self.assertRaisesRegex(ValueError, "No manifest.json in .*test-group.*can be deleted"):
+                        train_trials.run(self.evaluation_args(run_dir=str(run_dir), **changes))
+
+    def test_a_failure_while_planning_leaves_no_group_folder(self):
+        run_dir = self.make_run()
+        with mock.patch.object(train_trials, "external_training", side_effect=RuntimeError("boom")):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                train_trials.run(self.evaluation_args(run_dir=str(run_dir)))
+        self.assertFalse(self.group_dir.exists())
+
+    def test_a_malformed_journal_does_not_stop_the_evaluation(self):
+        run_dir = self.make_run()
+        with (run_dir / "logs/metrics.jsonl").open("a") as stream:
+            stream.write(json.dumps({"metrics": {"Train/Loss": 1}}) + "\n")  # a row without an epoch
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            report = train_trials.run(self.evaluation_args(run_dir=str(run_dir), n_trials=1))
+        self.assertEqual(report["curves"], [])
+        self.assertFalse(any(key.startswith(("Final/", "BestCheckpoint/")) for key in report["summary"]))
+        self.assertIn("Evaluation/Success_Rate", report["summary"])
+
     def test_existing_model_needs_a_wandb_project_unless_logging_is_disabled(self):
         run_dir = self.make_run()
         with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
@@ -594,6 +639,14 @@ class LauncherTests(unittest.TestCase):
 
 
 class MetricTests(unittest.TestCase):
+    def test_malformed_metric_rows_are_value_errors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "metrics.jsonl"
+            for bad in ('{"metrics": {}}', '{"epoch": "x", "metrics": {}}', '[1, 2]', 'not json', '{"epoch": 1}'):
+                path.write_text(bad + "\n")
+                with self.assertRaisesRegex(ValueError, "Malformed metrics row 1"):
+                    read_history(path)
+
     def test_checkpoint_names_give_epoch_and_success(self):
         self.assertEqual(parse_checkpoint_name("m/model_epoch_1000_square_success_0.9.pth"),
                          (1000, [("square", 0.9)]))

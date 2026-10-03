@@ -63,9 +63,9 @@ def read_history(path):
                 continue
             try:
                 row = json.loads(line)
-            except json.JSONDecodeError as exc:
+                history[int(row["epoch"])] = row["metrics"]
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                 raise ValueError("Malformed metrics row {} in {}".format(number, path)) from exc
-            history[int(row["epoch"])] = row["metrics"]
     if not history:
         raise ValueError("No completed epochs in {}".format(path))
     return history

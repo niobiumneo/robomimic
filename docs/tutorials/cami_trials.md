@@ -192,7 +192,13 @@ and `errors` select outcomes. Replay them with
 ## Resume, rebuild, or test briefly
 
 If the training run or a trial fails, fix the cause and rerun the same command
-with `--resume`. Finished work is kept. An interrupted training run with a
+with `--resume`. Finished work is kept, so completed trials are not run again.
+Running the command a second time without `--resume` stops with a message,
+because its group folder already exists: add `--resume` to continue it, or use
+another `--group` (or delete the folder) to start over. Resuming needs the same
+options as the first attempt, so a changed `--n-trials` or `--run-dir` is refused.
+If a trial fails again, the child's traceback is printed just above the
+"Stopped at" line. An interrupted training run with a
 `last.pth` resumes with the trainer's optimizer and checkpoint resume (it does
 not restore the complete RNG state of an uninterrupted run), and the same W&B
 training run continues. A trial that failed is evaluated again into a new

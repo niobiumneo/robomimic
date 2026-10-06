@@ -6,6 +6,7 @@ New features:
 - run multiple trials per model
 - compute per-trial success-rate distributions
 - save trial-level and rollout-level CSV files for box plots / repeatability analysis
+- optionally stream rollout metrics and upload result CSVs to W&B
 
 Example:
 python run_trained_agent_multi_eval.py \
@@ -16,12 +17,20 @@ python run_trained_agent_multi_eval.py \
     --horizon 400 \
     --seed 0 \
     --results_dir /path/to/results
+
+Evaluate one existing checkpoint over 50 rollouts and track it in W&B:
+python -m robomimic.scripts.run_trained_agent_multi_eval \
+    --agents /path/model.pth --n_trials 1 --rollouts_per_trial 50 \
+    --horizon 400 --seed 42 --results_dir /path/to/results \
+    --wandb-project cami-contact-state --wandb-name square-best-eval50-seed42
 """
 
 import argparse
 import json
 import os
 import csv
+import random
+from contextlib import contextmanager
 import h5py
 import imageio
 import numpy as np
@@ -205,6 +214,161 @@ def write_trial_dataset(dataset_path, trajectories, env):
         data_grp.attrs["env_args"] = json.dumps(env.serialize(), indent=4)
 
 
+@contextmanager
+def preserve_random_state():
+    """Keep synchronous W&B calls from consuming the evaluator's RNG streams."""
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.get_rng_state()
+    cuda_states = torch.cuda.get_rng_state_all() if torch.cuda.is_initialized() else None
+    try:
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.set_rng_state(torch_state)
+        if cuda_states is not None:
+            torch.cuda.set_rng_state_all(cuda_states)
+
+
+class WandbEvaluation:
+    """Optional W&B run for one checkpoint/environment, separate from training."""
+
+    def __init__(self, args, ckpt_path, model_name, env_tag, horizon, output_dir):
+        self.run = None
+        self.sdk = None
+        self.completed = 0
+        self.successes = 0.0
+        self.returns = 0.0
+        self.horizons = 0
+        self.logging_error = False
+        mode = getattr(args, "wandb_mode", os.environ.get("WANDB_MODE", "online"))
+        project = getattr(args, "wandb_project", None)
+        if mode == "disabled" or not (getattr(args, "wandb", False) or project):
+            return
+        name = getattr(args, "wandb_name", None)
+        if name and (len(args.agents) > 1 or (args.envs and len(args.envs) > 1)):
+            name = "{}-{}-{}".format(name, model_name, env_tag)
+        try:
+            with preserve_random_state():
+                import wandb
+                self.sdk = wandb
+                self.run = wandb.init(
+                    project=project or "cami-contact-state",
+                    entity=getattr(args, "wandb_entity", None) or os.environ.get("WANDB_ENTITY"),
+                    name=name or "{}-{}-eval".format(model_name, env_tag),
+                    group=getattr(args, "wandb_group", None) or os.environ.get("WANDB_RUN_GROUP"),
+                    job_type="evaluation",
+                    mode=mode,
+                    dir=output_dir or os.getcwd(),
+                    config={
+                        "model": model_name, "checkpoint": os.path.abspath(ckpt_path),
+                        "environment": env_tag, "rollout_horizon": horizon,
+                        "n_trials": args.n_trials, "rollouts_per_trial": args.rollouts_per_trial,
+                        "eval_seed": args.seed, "seed_schedule": "once_per_trial: seed + trial_index",
+                        "camera_names": args.camera_names,
+                    },
+                )
+                if self.run is None:
+                    raise RuntimeError("W&B did not return a run")
+                self.run.define_metric("rollout")
+                self.run.define_metric("Rollout/*", step_metric="rollout")
+                self.run.define_metric("Running/*", step_metric="rollout")
+                self.run.define_metric("trial")
+                self.run.define_metric("Trial/*", step_metric="trial")
+        except Exception as exc:
+            if self.run is not None:
+                try:
+                    with preserve_random_state():
+                        self.run.finish(exit_code=1)
+                except Exception:
+                    pass
+            raise RuntimeError(
+                "W&B evaluation initialization failed. Install W&B with `python -m pip install wandb`, "
+                "run `wandb login`, and check the project/entity. "
+                "Use --wandb-mode offline for intentional offline logging."
+            ) from exc
+        if mode == "offline":
+            print("W&B evaluation is offline; upload the saved run later with wandb sync.", flush=True)
+        elif getattr(self.run, "url", None):
+            print("W&B evaluation: {}".format(self.run.url), flush=True)
+
+    def log(self, values):
+        if self.run is None or self.logging_error:
+            return
+        try:
+            with preserve_random_state():
+                self.run.log(values)
+        except Exception as exc:
+            self.logging_error = True
+            print("W&B streaming stopped ({}). Evaluation continues; results are saved to CSV.".format(exc),
+                  flush=True)
+
+    def log_rollout(self, stats, trial_idx, rollout_idx, trial_seed):
+        self.completed += 1
+        self.successes += stats["Success_Rate"]
+        self.returns += stats["Return"]
+        self.horizons += stats["Horizon"]
+        self.log({
+            "rollout": self.completed, "trial": trial_idx + 1,
+            "episode_in_trial": rollout_idx + 1, "trial_seed": trial_seed,
+            "Rollout/Success_Rate": stats["Success_Rate"],
+            "Rollout/Return": stats["Return"], "Rollout/Horizon": stats["Horizon"],
+            "Running/Success_Rate": self.successes / self.completed,
+            "Running/Num_Success": self.successes,
+            "Running/Return": self.returns / self.completed,
+            "Running/Horizon": self.horizons / self.completed,
+        })
+
+    def log_trial(self, row):
+        self.log({
+            "trial": row["trial"] + 1, "trial_seed": row["trial_seed"],
+            "Trial/Success_Rate": row["success_rate_mean"],
+            "Trial/Num_Success": row["num_success"], "Trial/Num_Rollouts": row["num_rollouts"],
+            "Trial/Return": row["return_mean"], "Trial/Horizon": row["horizon_mean"],
+        })
+
+    def finish(self, trial_rows, rollout_rows, csv_paths, failed=False):
+        if self.run is None:
+            return
+        try:
+            with preserve_random_state():
+                summary = {"Evaluation/Num_Rollouts": self.completed,
+                           "Evaluation/Num_Success": int(self.successes),
+                           "Evaluation/Num_Trials": len(trial_rows),
+                           "Evaluation/Complete": not failed}
+                if self.completed:
+                    summary.update({"Evaluation/Success_Rate": self.successes / self.completed,
+                                    "Evaluation/Return": self.returns / self.completed,
+                                    "Evaluation/Horizon": self.horizons / self.completed})
+                self.run.summary.update(summary)
+                if trial_rows:
+                    self.run.summary["Evaluation/Success_Rate_Std_Over_Trials"] = float(
+                        np.std([row["success_rate_mean"] for row in trial_rows]))
+                tables = {}
+                for name, rows in (("trial_results", trial_rows), ("rollout_results", rollout_rows)):
+                    if rows:
+                        columns = list(rows[0])
+                        tables[name] = self.sdk.Table(columns=columns,
+                                                      data=[[row[column] for column in columns] for row in rows])
+                if tables:
+                    self.run.log(tables)
+                if csv_paths:
+                    artifact = self.sdk.Artifact("{}-rollout-results".format(self.run.id), type="evaluation")
+                    for path in csv_paths:
+                        artifact.add_file(path)
+                    self.run.log_artifact(artifact)
+        except Exception as exc:
+            self.logging_error = True
+            print("W&B final upload failed ({}). Local CSV results are available.".format(exc), flush=True)
+        finally:
+            try:
+                with preserve_random_state():
+                    self.run.finish(exit_code=1 if failed or self.logging_error else 0)
+            except Exception as exc:
+                print("Could not close the W&B run ({}).".format(exc), flush=True)
+
+
 def evaluate_one_model(ckpt_path, model_name, args, device):
     env_names = args.envs if args.envs is not None else [None]
 
@@ -223,62 +387,74 @@ def evaluate_one_model(ckpt_path, model_name, args, device):
         per_rollout_rows = []
         per_trial_rows = []
 
-        for trial_idx in range(args.n_trials):
-            trial_seed = None if args.seed is None else args.seed + trial_idx
-            seed_everything(trial_seed, env=env)
+        tracker = WandbEvaluation(args, ckpt_path, model_name, env_tag, rollout_horizon, model_env_dir)
+        csv_paths = []
+        failed = True
+        try:
+            for trial_idx in range(args.n_trials):
+                trial_seed = None if args.seed is None else args.seed + trial_idx
+                seed_everything(trial_seed, env=env)
 
-            print(f"\n=== Model: {model_name} | Env: {env_tag} | Trial {trial_idx + 1}/{args.n_trials} | Seed: {trial_seed} ===")
+                print(f"\n=== Model: {model_name} | Env: {env_tag} | Trial {trial_idx + 1}/{args.n_trials} | Seed: {trial_seed} ===")
 
-            trajectories = []
-            trial_rollout_stats = []
+                trajectories = []
+                trial_rollout_stats = []
 
-            for rollout_idx in range(args.rollouts_per_trial):
-                stats, traj = rollout(
-                    policy=policy,
-                    env=env,
-                    horizon=rollout_horizon,
-                    render=args.render,
-                    video_writer=None,
-                    video_skip=args.video_skip,
-                    return_obs=(args.dataset_obs and args.save_datasets),
-                    camera_names=args.camera_names,
-                )
+                for rollout_idx in range(args.rollouts_per_trial):
+                    stats, traj = rollout(
+                        policy=policy,
+                        env=env,
+                        horizon=rollout_horizon,
+                        render=args.render,
+                        video_writer=None,
+                        video_skip=args.video_skip,
+                        return_obs=(args.dataset_obs and args.save_datasets),
+                        camera_names=args.camera_names,
+                    )
 
-                trial_rollout_stats.append(stats)
-                trajectories.append(traj)
+                    trial_rollout_stats.append(stats)
+                    trajectories.append(traj)
 
-                per_rollout_rows.append({
+                    per_rollout_rows.append({
+                        "model": model_name,
+                        "env": env_tag,
+                        "checkpoint": ckpt_path,
+                        "trial": trial_idx,
+                        "trial_seed": trial_seed,
+                        "rollout": rollout_idx,
+                        "return": stats["Return"],
+                        "horizon": stats["Horizon"],
+                        "success": stats["Success_Rate"],
+                    })
+                    tracker.log_rollout(stats, trial_idx, rollout_idx, trial_seed)
+
+                stats_dict = TensorUtils.list_of_flat_dict_to_dict_of_list(trial_rollout_stats)
+                trial_summary = {
                     "model": model_name,
                     "env": env_tag,
                     "checkpoint": ckpt_path,
                     "trial": trial_idx,
                     "trial_seed": trial_seed,
-                    "rollout": rollout_idx,
-                    "return": stats["Return"],
-                    "horizon": stats["Horizon"],
-                    "success": stats["Success_Rate"],
-                })
+                    "num_rollouts": args.rollouts_per_trial,
+                    "success_rate_mean": float(np.mean(stats_dict["Success_Rate"])),
+                    "num_success": int(np.sum(stats_dict["Success_Rate"])),
+                    "return_mean": float(np.mean(stats_dict["Return"])),
+                    "return_std": float(np.std(stats_dict["Return"])),
+                    "horizon_mean": float(np.mean(stats_dict["Horizon"])),
+                    "horizon_std": float(np.std(stats_dict["Horizon"])),
+                }
+                per_trial_rows.append(trial_summary)
+                tracker.log_trial(trial_summary)
 
-            stats_dict = TensorUtils.list_of_flat_dict_to_dict_of_list(trial_rollout_stats)
-            trial_summary = {
-                "model": model_name,
-                "env": env_tag,
-                "checkpoint": ckpt_path,
-                "trial": trial_idx,
-                "trial_seed": trial_seed,
-                "num_rollouts": args.rollouts_per_trial,
-                "success_rate_mean": float(np.mean(stats_dict["Success_Rate"])),
-                "num_success": int(np.sum(stats_dict["Success_Rate"])),
-                "return_mean": float(np.mean(stats_dict["Return"])),
-                "return_std": float(np.std(stats_dict["Return"])),
-                "horizon_mean": float(np.mean(stats_dict["Horizon"])),
-                "horizon_std": float(np.std(stats_dict["Horizon"])),
-            }
-            per_trial_rows.append(trial_summary)
+            if model_env_dir is not None:
+                write_csv(os.path.join(model_env_dir, "trial_results.csv"), per_trial_rows)
+                write_csv(os.path.join(model_env_dir, "rollout_results.csv"), per_rollout_rows)
+                csv_paths = [os.path.join(model_env_dir, "trial_results.csv"),
+                             os.path.join(model_env_dir, "rollout_results.csv")]
 
-        if model_env_dir is not None:
-            write_csv(os.path.join(model_env_dir, "trial_results.csv"), per_trial_rows)
-            write_csv(os.path.join(model_env_dir, "rollout_results.csv"), per_rollout_rows)
+            failed = False
+        finally:
+            tracker.finish(per_trial_rows, per_rollout_rows, csv_paths, failed=failed)
 
         all_env_trial_rows.extend(per_trial_rows)
         all_env_rollout_rows.extend(per_rollout_rows)
@@ -296,6 +472,10 @@ def write_csv(path, rows):
 
 
 def run_multi_eval(args):
+    if args.n_trials < 1 or args.rollouts_per_trial < 1:
+        raise ValueError("n_trials and rollouts_per_trial must be positive")
+    if args.horizon is not None and args.horizon < 1:
+        raise ValueError("horizon must be positive")
     assert not (args.render and args.video_path is not None), \
         "Choose either on-screen rendering or video output, not both."
 
@@ -355,7 +535,7 @@ def run_multi_eval(args):
         print(json.dumps(summary, indent=4))
 
 
-if __name__ == "__main__":
+def build_parser():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -456,5 +636,15 @@ if __name__ == "__main__":
         help="base seed; trial i uses seed + i",
     )
 
-    args = parser.parse_args()
-    run_multi_eval(args)
+    parser.add_argument("--wandb", action="store_true", help="enable W&B evaluation logging")
+    parser.add_argument("--wandb-project", "--wandb_project", help="W&B project; also enables logging")
+    parser.add_argument("--wandb-entity", "--wandb_entity", help="W&B team/account (default: WANDB_ENTITY)")
+    parser.add_argument("--wandb-name", "--wandb_name", help="display name for the evaluation run")
+    parser.add_argument("--wandb-group", "--wandb_group", help="optional experiment comparison group")
+    parser.add_argument("--wandb-mode", "--wandb_mode", choices=["online", "offline", "disabled"],
+                        default=os.environ.get("WANDB_MODE", "online"))
+    return parser
+
+
+if __name__ == "__main__":
+    run_multi_eval(build_parser().parse_args())

@@ -1,4 +1,4 @@
-# Track CaMI training in Weights & Biases
+# Track CaMI training and evaluation in Weights & Biases
 
 Run these commands from the repository root on `contact-state`, using the
 same Python environment as training. W&B is optional and is disabled in the
@@ -72,6 +72,63 @@ python -m robomimic.scripts.train \
 `experiment.logging.wandb_proj_name="cami-contact-state"`. The CLI overrides
 these settings. `--name` selects the experiment output directory; this branch
 generates the W&B display name from the algorithm, dataset, and timestamp.
+
+## Evaluate an existing checkpoint over 50 rollouts
+
+Use this command for a single evaluation of a model that is already trained.
+Replace the checkpoint path with the actual `.pth` file from your seed-42 run:
+
+```bash
+python -m robomimic.scripts.run_trained_agent_multi_eval \
+  --agents /full/path/to/your_checkpoint.pth \
+  --agent_names CaMI \
+  --n_trials 1 \
+  --rollouts_per_trial 50 \
+  --horizon 400 \
+  --seed 42 \
+  --results_dir results/cami_best_seed42_50 \
+  --wandb-project cami-contact-state \
+  --wandb-name square-best-eval50-seed42
+```
+
+This restores one checkpoint and runs exactly 50 episodes without training.
+Use a 700-step horizon for Tool Hang. The evaluation gets a separate W&B run
+with `job_type=evaluation`; its config records the checkpoint, evaluation seed,
+rollout budget, resolved horizon, and seed schedule.
+
+| W&B metric | Meaning |
+| --- | --- |
+| `Rollout/Success_Rate` | Success (0 or 1) of each episode, with rollout number on the x-axis |
+| `Running/Success_Rate` | Fraction of successful episodes so far; the last point is the final result |
+| `Rollout/Return`, `Rollout/Horizon` | Reward and duration of each episode |
+| `Trial/Success_Rate` | Mean success rate of the complete 50-episode batch |
+| `Evaluation/Success_Rate` | Final success rate in the run summary |
+| `Evaluation/Num_Success`, `Evaluation/Num_Rollouts` | Successful and completed episode counts |
+
+The run also contains `trial_results` and `rollout_results` tables and an
+`evaluation` artifact containing the result CSVs. The same CSVs remain in
+`--results_dir`, including the existing per-model/environment folders.
+
+`--wandb-project` enables tracking; `--wandb` enables it with the default
+`cami-contact-state` project. `--wandb-entity` selects an account/team and
+`--wandb-group` groups comparisons. Multiple checkpoints or environments create
+separate W&B runs with the same metric names. Use `--wandb-mode offline` to
+record locally and sync later, or `--wandb-mode disabled` for CSV-only evaluation.
+Missing dependencies or initialization errors are reported before the rollout
+batch. If streaming later fails, evaluation continues and preserves its CSVs.
+
+The seed handling follows the original evaluator: NumPy and PyTorch are seeded
+once before each trial with `seed + trial_index`. With one trial and `--seed 42`,
+the random streams advance across the 50 episodes; they are not reset to 42
+for every episode. W&B calls preserve the global RNG states. The original
+best-effort environment seeding is retained, so a simulator using an independent
+generator without a wrapper `seed()` method may still randomize placements.
+Matching a training seed does not reconstruct the episodes that produced a
+training-time checkpoint score. Use the same simulator and evaluation settings
+for model comparisons, and report the newly measured success rate.
+
+This command uploads numeric results and CSVs. Use `rollout_best.py` below for
+trajectory and video export; its per-episode seeding is a separate protocol.
 
 ## Compact terminal output
 

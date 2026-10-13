@@ -127,8 +127,53 @@ Matching a training seed does not reconstruct the episodes that produced a
 training-time checkpoint score. Use the same simulator and evaluation settings
 for model comparisons, and report the newly measured success rate.
 
-This command uploads numeric results and CSVs. Use `rollout_best.py` below for
-trajectory and video export; its per-episode seeding is a separate protocol.
+### Record the same evaluation episodes
+
+Add `--save-videos` to record every successful and failed episode in this same
+evaluation loop. Add `--wandb-videos` to also upload each clip under
+`Rollout/Video` in W&B; that flag enables recording too. For a seed-0 Square
+evaluation with every simulation step recorded:
+
+```bash
+python -m robomimic.scripts.run_trained_agent_multi_eval \
+  --agents /full/path/to/your_checkpoint.pth \
+  --agent_names CaMI \
+  --n_trials 1 --rollouts_per_trial 50 --horizon 400 --seed 0 \
+  --results_dir results/cami_best_eval_seed0_50_videos \
+  --save-videos --video_skip 1 \
+  --wandb-project cami-contact-state \
+  --wandb-name square-best-eval50-seed0-videos \
+  --wandb-videos
+```
+
+From the repository root, those clips are saved under:
+
+```text
+results/cami_best_eval_seed0_50_videos/CaMI/checkpoint_env/videos/trial_01_seed_0/
+```
+
+The directory contains `successful_rollout_000.mp4`, `failed_rollout_001.mp4`,
+and the corresponding outcome name for each episode. Filenames keep the
+zero-based rollout index used in the CSV. The recorder prints the video folder
+before the batch and each clip path after that episode finishes. The
+`rollout_results.csv` and W&B table gain a `video` column with the absolute clip
+path. Clips are captured from the same policy execution used for the reported
+metrics, with seed 0 applied once before the batch.
+
+The default playback rate is the environment's `control_freq / video_skip`:
+20 fps when every step is recorded in Square's 20 Hz environment. Use
+`--video-fps 60` for faster playback or `--camera_names agentview robot0_eye_in_hand`
+for side-by-side cameras. `--video_path /path/to/clips` selects a different
+video root, with separate model/environment/trial subfolders. Choose a new
+`--results_dir` or video root for another invocation; existing video batches
+are protected from overwriting.
+
+Recording is optional. The command above the recording section saves numeric
+results and CSVs only. A process started without recording does not acquire
+video capture when you pull this update; unrecorded episodes cannot be turned
+into their original videos afterwards. Start a new evaluation with recording
+enabled. `rollout_best.py` below also exports simulator trajectories and uses
+its own per-episode seeding protocol.
 
 ## Compact terminal output
 

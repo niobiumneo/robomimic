@@ -8,6 +8,8 @@ import csv
 import importlib.util
 import io
 import random
+import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -57,8 +59,10 @@ def load_evaluator():
     wrappers.EnvWrapper = type("EnvWrapper", (), {})
     algo = types.ModuleType("robomimic.algo")
     algo.RolloutPolicy = type("RolloutPolicy", (), {})
+    imageio = package("imageio")
+    imageio.v2 = types.ModuleType("imageio.v2")
     modules = {
-        "torch": torch, "h5py": types.ModuleType("h5py"), "imageio": types.ModuleType("imageio"),
+        "torch": torch, "h5py": types.ModuleType("h5py"), "imageio": imageio, "imageio.v2": imageio.v2,
         "robomimic": package("robomimic"), "robomimic.utils": package("robomimic.utils"),
         "robomimic.utils.file_utils": types.ModuleType("robomimic.utils.file_utils"),
         "robomimic.utils.torch_utils": torch_utils, "robomimic.utils.tensor_utils": tensor_utils,
@@ -99,6 +103,12 @@ class FakeWandb:
     def Table(self, **kwargs):
         self.consume_random()
         return types.SimpleNamespace(**kwargs)
+
+    def Video(self, path, **kwargs):
+        self.consume_random()
+        if not Path(path).is_file():
+            raise FileNotFoundError(path)
+        return types.SimpleNamespace(path=path, **kwargs)
 
     def Artifact(self, name, type):
         self.consume_random()
@@ -180,6 +190,15 @@ class EvaluationWandbTests(unittest.TestCase):
             def is_success(self):
                 return {"task": self.placement > 0.2}
 
+            def render(self, mode, height, width, camera_name):
+                # Rendering must not change the randomness used by later episodes.
+                random.random()
+                np.random.random()
+                evaluator.torch.cpu_state += 100
+                evaluator.torch.cuda_state += 100
+                color = 10 if camera_name == "agentview" else 20
+                return np.full((height, width, 3), color, dtype=np.uint8)
+
         class Policy(evaluator.RolloutPolicy):
             def start_episode(self):
                 pass
@@ -190,6 +209,41 @@ class EvaluationWandbTests(unittest.TestCase):
                 return np.array([0.0])
 
         self.Env, self.Policy = Env, Policy
+
+    def video_writer(self, path, **kwargs):
+        """Capture frames/writer lifetime; no external encoder is needed for these checks."""
+        evaluator = self.evaluator
+        records = self.video_writers
+
+        def consume():
+            random.random()
+            np.random.random()
+            evaluator.torch.cpu_state += 100
+            evaluator.torch.cuda_state += 100
+
+        class Writer:
+            def __init__(self):
+                self.path, self.kwargs, self.frames, self.closed = path, kwargs, [], False
+                consume()
+
+            def append_data(self, frame):
+                consume()
+                self.frames.append((frame.shape, int(frame[0, 0, 0]), int(frame[0, -1, 0])))
+
+            def close(self):
+                consume()
+                self.closed = True
+                if self.frames:
+                    Path(path).write_bytes(b"synthetic clip for evaluator tests")
+
+        writer = Writer()
+        records.append(writer)
+        return writer
+
+    def evaluate_with_videos(self, args, sdk=None, create_env=None):
+        self.video_writers = []
+        with mock.patch.object(self.evaluator.imageio, "get_writer", side_effect=self.video_writer, create=True):
+            self.evaluate(args, sdk, create_env)
 
     def args(self, output="results", *extra):
         return self.evaluator.build_parser().parse_args([
@@ -354,6 +408,121 @@ class EvaluationWandbTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "positive"):
                         self.evaluator.run_multi_eval(args)
                 create.assert_not_called()
+
+    def test_50_seed0_rollouts_save_both_outcomes_and_csv_video_paths(self):
+        args = self.args("videos", "--save-videos", "--video_skip", "1", "--seed", "0",
+                         "--camera_names", "agentview", "robot0_eye_in_hand")
+        self.evaluate_with_videos(args)
+        folder = Path(args.results_dir) / "CaMI/checkpoint_env/videos/trial_01_seed_0"
+        self.assertEqual(len(list(folder.glob("*.mp4"))), 50)
+        self.assertTrue(list(folder.glob("successful_rollout_*.mp4")))
+        self.assertTrue(list(folder.glob("failed_rollout_*.mp4")))
+        self.assertEqual(self.envs[0].seeds, [0])
+        self.assertEqual(len(self.video_writers), 50)
+        self.assertTrue(all(writer.closed for writer in self.video_writers))
+        self.assertEqual({writer.kwargs["fps"] for writer in self.video_writers}, {20})
+        self.assertTrue(all(writer.frames == [((512, 1024, 3), 10, 20)] for writer in self.video_writers))
+        _, rows = self.csv_rows(args, "rollout_results.csv")
+        self.assertTrue(all(Path(row["video"]).is_file() for row in rows))
+        for row in rows:
+            expected = "successful" if float(row["success"]) else "failed"
+            self.assertEqual(Path(row["video"]).name, "{}_rollout_{:03d}.mp4".format(expected, int(row["rollout"])))
+
+    def test_video_and_wandb_record_the_same_episode_sequence_as_metrics_only(self):
+        baseline = self.args("no-video", "--seed", "0")
+        self.evaluate(baseline)
+        placements = self.envs[0].placements.copy()
+        torch_state, cuda_state = self.evaluator.torch.cpu_state, self.evaluator.torch.cuda_state
+        args = self.args("recorded", "--seed", "0", "--wandb-project", "cami", "--wandb-videos")
+        sdk = FakeWandb(self.evaluator)
+        self.evaluate_with_videos(args, sdk)
+        self.assertEqual(self.envs[1].placements, placements)
+        _, baseline_rows = self.csv_rows(baseline, "rollout_results.csv")
+        _, recorded_rows = self.csv_rows(args, "rollout_results.csv")
+        self.assertEqual([{key: row[key] for key in baseline_rows[0]} for row in recorded_rows], baseline_rows)
+        self.assertEqual(self.evaluator.torch.cpu_state, torch_state)
+        self.assertEqual(self.evaluator.torch.cuda_state, cuda_state)
+        episodes = [row for row in sdk.runs[0].history if "Rollout/Success_Rate" in row]
+        self.assertEqual(len(episodes), 50)
+        self.assertTrue(all(Path(row["Rollout/Video"].path).is_file() for row in episodes))
+        self.assertEqual(sdk.runs[0].exit_code, 0)
+        self.assertEqual(sdk.runs[0].summary["Evaluation/Num_Rollouts"], 50)
+
+    def test_video_writers_close_when_simulation_raises(self):
+        def failing_environment(*args, **kwargs):
+            policy, env, horizon = self.create_env(*args, **kwargs)
+            env.fail_at = 0
+            return policy, env, horizon
+
+        args = self.args("failed-video", "--save-videos")
+        with self.assertRaisesRegex(KeyError, "simulator reset failed"):
+            self.evaluate_with_videos(args, create_env=failing_environment)
+        self.assertEqual(len(self.video_writers), 1)
+        self.assertTrue(self.video_writers[0].closed)
+
+    def test_custom_video_root_and_frame_rate(self):
+        args = self.args("custom", "--video_path", str(self.root / "clips"), "--video-fps", "60",
+                         "--rollouts_per_trial", "2", "--seed", "0")
+        self.evaluate_with_videos(args)
+        folder = self.root / "clips/CaMI/checkpoint_env/trial_01_seed_0"
+        self.assertEqual(len(list(folder.glob("*.mp4"))), 2)
+        self.assertEqual({writer.kwargs["fps"] for writer in self.video_writers}, {60})
+
+    def test_video_recording_rejects_overwriting_an_existing_batch(self):
+        args = self.args("protected", "--save-videos", "--rollouts_per_trial", "2")
+        self.evaluate_with_videos(args)
+        folder = Path(args.results_dir) / "CaMI/checkpoint_env/videos/trial_01_seed_42"
+        original = {path.name: path.read_bytes() for path in folder.glob("*.mp4")}
+        with self.assertRaises(FileExistsError):
+            self.evaluate_with_videos(args)
+        self.assertEqual({path.name: path.read_bytes() for path in folder.glob("*.mp4")}, original)
+
+    def test_invalid_video_options_fail_before_loading_the_model(self):
+        for extra in (("--video_skip", "0"), ("--video-fps", "0"), ("--render", "--save-videos")):
+            with self.subTest(extra=extra):
+                args = self.args("bad-video", *extra)
+                with mock.patch.object(self.evaluator, "create_env_and_policy") as create:
+                    with self.assertRaises((ValueError, AssertionError)):
+                        self.evaluator.run_multi_eval(args)
+                create.assert_not_called()
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe are not installed")
+    def test_real_mp4_encoding_produces_playable_episode_clips(self):
+        """Exercise the writer boundary with real encoding, while keeping policy/simulator synthetic."""
+        class Writer:
+            def __init__(self, path, fps, **kwargs):
+                self.process = subprocess.Popen([
+                    shutil.which("ffmpeg"), "-v", "error", "-y", "-f", "rawvideo",
+                    "-pix_fmt", "rgb24", "-s", "512x512", "-r", str(fps), "-i", "pipe:0",
+                    "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", path,
+                ], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+            def append_data(self, frame):
+                self.process.stdin.write(frame.tobytes())
+
+            def close(self):
+                self.process.stdin.close()
+                self.process.wait(timeout=15)
+                error = self.process.stderr.read().decode()
+                self.process.stderr.close()
+                if self.process.returncode:
+                    raise RuntimeError(error)
+
+        args = self.args("real-mp4", "--save-videos", "--video_skip", "1", "--seed", "0",
+                         "--rollouts_per_trial", "3")
+        with mock.patch.object(self.evaluator.imageio, "get_writer", side_effect=Writer, create=True):
+            self.evaluate(args)
+        _, rows = self.csv_rows(args, "rollout_results.csv")
+        for row in rows:
+            metadata = subprocess.check_output([
+                shutil.which("ffprobe"), "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height,nb_frames,r_frame_rate",
+                "-of", "json", row["video"],
+            ], text=True)
+            import json
+            stream = json.loads(metadata)["streams"][0]
+            self.assertEqual((stream["width"], stream["height"], stream["nb_frames"], stream["r_frame_rate"]),
+                             (512, 512, "1", "20/1"))
 
 
 if __name__ == "__main__":

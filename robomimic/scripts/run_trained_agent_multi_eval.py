@@ -7,6 +7,7 @@ New features:
 - compute per-trial success-rate distributions
 - save trial-level and rollout-level CSV files for box plots / repeatability analysis
 - optionally stream rollout metrics and upload result CSVs to W&B
+- save a successful or failed MP4 for each episode with --save-videos
 
 Example:
 python run_trained_agent_multi_eval.py \
@@ -32,7 +33,7 @@ import csv
 import random
 from contextlib import contextmanager
 import h5py
-import imageio
+import imageio.v2 as imageio
 import numpy as np
 from copy import deepcopy
 
@@ -111,17 +112,18 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
 
             if video_writer is not None:
                 if video_count % video_skip == 0:
-                    video_img = []
-                    for cam_name in camera_names:
-                        frame = env.render(
-                            mode="rgb_array",
-                            height=512,
-                            width=512,
-                            camera_name=cam_name,
-                        )
-                        video_img.append(frame)
-                    video_img = np.concatenate(video_img, axis=1)
-                    video_writer.append_data(video_img)
+                    with preserve_random_state():
+                        video_img = []
+                        for cam_name in camera_names:
+                            frame = env.render(
+                                mode="rgb_array",
+                                height=512,
+                                width=512,
+                                camera_name=cam_name,
+                            )
+                            video_img.append(frame)
+                        video_img = np.concatenate(video_img, axis=1)
+                        video_writer.append_data(video_img)
                 video_count += 1
 
             traj["actions"].append(act)
@@ -180,7 +182,7 @@ def create_env_and_policy(ckpt_path, device, args, env_name=None):
         ckpt_dict=ckpt_dict,
         env_name=env_name,
         render=args.render,
-        render_offscreen=(args.video_path is not None),
+        render_offscreen=video_enabled(args),
         verbose=True,
     )
 
@@ -216,7 +218,7 @@ def write_trial_dataset(dataset_path, trajectories, env):
 
 @contextmanager
 def preserve_random_state():
-    """Keep synchronous W&B calls from consuming the evaluator's RNG streams."""
+    """Keep synchronous logging and video I/O from consuming the evaluator's RNG streams."""
     python_state = random.getstate()
     numpy_state = np.random.get_state()
     torch_state = torch.get_rng_state()
@@ -231,6 +233,56 @@ def preserve_random_state():
             torch.cuda.set_rng_state_all(cuda_states)
 
 
+def video_enabled(args):
+    return bool(getattr(args, "save_videos", False) or getattr(args, "wandb_videos", False)
+                or args.video_path is not None)
+
+
+class EpisodeVideoWriter:
+    """Stream one episode to disk and count its frames without buffering the full clip."""
+
+    def __init__(self, path, fps):
+        self.frames = 0
+        with preserve_random_state():
+            self.writer = imageio.get_writer(path, format="FFMPEG", fps=fps)
+
+    def append_data(self, frame):
+        self.writer.append_data(frame)
+        self.frames += 1
+
+    def close(self):
+        with preserve_random_state():
+            self.writer.close()
+
+
+def recorded_rollout(policy, env, horizon, args, video_dir, rollout_idx):
+    """Run the original rollout once; video capture uses those same simulator steps."""
+    writer = None
+    pending = None
+    if video_dir is not None:
+        pending = os.path.join(video_dir, "rollout_{:03d}.mp4".format(rollout_idx))
+        simulator = getattr(getattr(env, "unwrapped", env), "env", env)
+        control_freq = getattr(simulator, "control_freq", 20) or 20
+        fps = getattr(args, "video_fps", None) or float(control_freq) / args.video_skip
+        writer = EpisodeVideoWriter(pending, fps)
+    try:
+        stats, traj = rollout(
+            policy=policy, env=env, horizon=horizon, render=args.render,
+            video_writer=writer, video_skip=args.video_skip,
+            return_obs=(args.dataset_obs and args.save_datasets), camera_names=args.camera_names,
+        )
+    finally:
+        if writer is not None:
+            writer.close()
+    video = None
+    if writer is not None and writer.frames:
+        status = "successful" if stats["Success_Rate"] else "failed"
+        video = os.path.join(video_dir, "{}_rollout_{:03d}.mp4".format(status, rollout_idx))
+        os.replace(pending, video)
+        print("Rollout {} | {} | video: {}".format(rollout_idx + 1, status, video), flush=True)
+    return stats, traj, video
+
+
 class WandbEvaluation:
     """Optional W&B run for one checkpoint/environment, separate from training."""
 
@@ -242,9 +294,10 @@ class WandbEvaluation:
         self.returns = 0.0
         self.horizons = 0
         self.logging_error = False
+        self.wandb_videos = getattr(args, "wandb_videos", False)
         mode = getattr(args, "wandb_mode", os.environ.get("WANDB_MODE", "online"))
         project = getattr(args, "wandb_project", None)
-        if mode == "disabled" or not (getattr(args, "wandb", False) or project):
+        if mode == "disabled" or not (getattr(args, "wandb", False) or project or self.wandb_videos):
             return
         name = getattr(args, "wandb_name", None)
         if name and (len(args.agents) > 1 or (args.envs and len(args.envs) > 1)):
@@ -267,6 +320,8 @@ class WandbEvaluation:
                         "n_trials": args.n_trials, "rollouts_per_trial": args.rollouts_per_trial,
                         "eval_seed": args.seed, "seed_schedule": "once_per_trial: seed + trial_index",
                         "camera_names": args.camera_names,
+                        "save_videos": video_enabled(args), "video_skip": args.video_skip,
+                        "video_fps": getattr(args, "video_fps", None), "wandb_videos": self.wandb_videos,
                     },
                 )
                 if self.run is None:
@@ -293,18 +348,20 @@ class WandbEvaluation:
         elif getattr(self.run, "url", None):
             print("W&B evaluation: {}".format(self.run.url), flush=True)
 
-    def log(self, values):
+    def log(self, values, video_path=None):
         if self.run is None or self.logging_error:
             return
         try:
             with preserve_random_state():
+                if video_path and self.wandb_videos:
+                    values = dict(values, **{"Rollout/Video": self.sdk.Video(video_path, format="mp4")})
                 self.run.log(values)
         except Exception as exc:
             self.logging_error = True
             print("W&B streaming stopped ({}). Evaluation continues; results are saved to CSV.".format(exc),
                   flush=True)
 
-    def log_rollout(self, stats, trial_idx, rollout_idx, trial_seed):
+    def log_rollout(self, stats, trial_idx, rollout_idx, trial_seed, video_path=None):
         self.completed += 1
         self.successes += stats["Success_Rate"]
         self.returns += stats["Return"]
@@ -318,7 +375,7 @@ class WandbEvaluation:
             "Running/Num_Success": self.successes,
             "Running/Return": self.returns / self.completed,
             "Running/Horizon": self.horizons / self.completed,
-        })
+        }, video_path=video_path)
 
     def log_trial(self, row):
         self.log({
@@ -399,17 +456,18 @@ def evaluate_one_model(ckpt_path, model_name, args, device):
 
                 trajectories = []
                 trial_rollout_stats = []
+                video_dir = None
+                if video_enabled(args):
+                    video_root = (os.path.join(args.video_path, model_name, env_tag) if args.video_path
+                                  else os.path.join(model_env_dir, "videos"))
+                    video_dir = os.path.join(video_root, "trial_{:02d}_seed_{}".format(trial_idx + 1, trial_seed))
+                    # Separate invocations must not overwrite clips from earlier evaluations.
+                    os.makedirs(video_dir, exist_ok=False)
+                    print("Videos: {}".format(os.path.abspath(video_dir)), flush=True)
 
                 for rollout_idx in range(args.rollouts_per_trial):
-                    stats, traj = rollout(
-                        policy=policy,
-                        env=env,
-                        horizon=rollout_horizon,
-                        render=args.render,
-                        video_writer=None,
-                        video_skip=args.video_skip,
-                        return_obs=(args.dataset_obs and args.save_datasets),
-                        camera_names=args.camera_names,
+                    stats, traj, video = recorded_rollout(
+                        policy, env, rollout_horizon, args, video_dir, rollout_idx,
                     )
 
                     trial_rollout_stats.append(stats)
@@ -426,7 +484,9 @@ def evaluate_one_model(ckpt_path, model_name, args, device):
                         "horizon": stats["Horizon"],
                         "success": stats["Success_Rate"],
                     })
-                    tracker.log_rollout(stats, trial_idx, rollout_idx, trial_seed)
+                    if video_dir is not None:
+                        per_rollout_rows[-1]["video"] = os.path.abspath(video) if video else ""
+                    tracker.log_rollout(stats, trial_idx, rollout_idx, trial_seed, video_path=video)
 
                 stats_dict = TensorUtils.list_of_flat_dict_to_dict_of_list(trial_rollout_stats)
                 trial_summary = {
@@ -476,7 +536,11 @@ def run_multi_eval(args):
         raise ValueError("n_trials and rollouts_per_trial must be positive")
     if args.horizon is not None and args.horizon < 1:
         raise ValueError("horizon must be positive")
-    assert not (args.render and args.video_path is not None), \
+    if args.video_skip < 1 or (getattr(args, "video_fps", None) is not None and args.video_fps <= 0):
+        raise ValueError("video_skip and video_fps must be positive")
+    if video_enabled(args) and not args.results_dir and not args.video_path:
+        raise ValueError("Video recording requires results_dir or video_path")
+    assert not (args.render and video_enabled(args)), \
         "Choose either on-screen rendering or video output, not both."
 
     if args.render:
@@ -592,8 +656,14 @@ def build_parser():
         "--video_path",
         type=str,
         default=None,
-        help="if set, videos are saved per model/trial into results dir",
+        help="optional video output directory; also enables recording",
     )
+    parser.add_argument("--save-videos", "--save_videos", action="store_true",
+                        help="save each successful and failed rollout as an MP4 under results_dir")
+    parser.add_argument("--video-fps", "--video_fps", type=float,
+                        help="playback rate; default control_freq / video_skip for real-time speed")
+    parser.add_argument("--wandb-videos", "--wandb_videos", action="store_true",
+                        help="also log each recorded MP4 to W&B; enables recording and W&B")
 
     parser.add_argument(
         "--video_skip",

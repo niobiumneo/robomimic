@@ -24,6 +24,7 @@ from unittest import mock
 import numpy as np
 
 from robomimic.scripts import train_trials
+from robomimic.utils.eval_trial_statistics import summarize_trial_rollouts
 from robomimic.utils.trial_metrics import (
     ROLLOUT_FIELDS, TRIAL_FIELDS, ScalarJournal, describe, describe_checkpoint,
     parse_checkpoint_name, read_history, seed_environment, select_checkpoint, summarize,
@@ -216,13 +217,13 @@ class LauncherTests(unittest.TestCase):
             reader = csv.DictReader(stream)
             rows = list(reader)
         self.assertEqual(reader.fieldnames, list(TRIAL_FIELDS))
-        # The columns exist in the script whose output these files must be interchangeable with.
-        script = (train_trials.REPO_ROOT / "robomimic/scripts/run_trained_agent_multi_eval.py").read_text()
-        for field in TRIAL_FIELDS:
-            self.assertIn('"{}"'.format(field), script)
         manifest = json.loads((self.group_dir / "manifest.json").read_text())
         for row, trial in zip(rows, manifest["trials"]):
             episodes = trial["evaluation"]["episodes"]
+            # Compare actual scalar values with the multi-eval shared helper.
+            multi_eval_stats = summarize_trial_rollouts(episodes)
+            for field in TRIAL_FIELDS[5:]:
+                self.assertAlmostEqual(float(row[field]), multi_eval_stats[field])
             self.assertEqual(row["model"], "test-group")
             self.assertEqual(row["env"], "square")
             self.assertEqual((int(row["trial"]), int(row["trial_seed"]), int(row["num_rollouts"])),

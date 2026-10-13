@@ -69,6 +69,8 @@ def load_evaluator():
         "robomimic.envs": package("robomimic.envs"), "robomimic.envs.env_base": env_base,
         "robomimic.envs.wrappers": wrappers, "robomimic.algo": algo,
     }
+    # Pure statistics helpers are real code, not simulator/ML dependencies.
+    modules["robomimic.utils"].__path__ = [str(SCRIPT.parents[1] / "utils")]
     spec = importlib.util.spec_from_file_location("multi_eval_wandb_test_target", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     with mock.patch.dict(sys.modules, modules):
@@ -391,6 +393,44 @@ class EvaluationWandbTests(unittest.TestCase):
             episodes = [row for row in run.history if "rollout" in row]
             self.assertEqual([row["rollout"] for row in episodes], list(range(1, 51)))
         self.assertEqual(len(self.csv_rows(args, "rollout_results.csv")[1]), 100)
+
+    def test_completed_trial_peaks_and_summary_match_the_logged_rollouts(self):
+        sdk = FakeWandb(self.evaluator)
+        self.evaluate(self.args("trial-stats", "--wandb-project", "cami", "--n_trials", "2"), sdk)
+        run = sdk.runs[0]
+        trials = [row for row in run.history if "Trial/Success_Rate" in row]
+        for trial in trials:
+            episodes = [row for row in run.history if "Rollout/Success_Rate" in row
+                        and row["trial"] == trial["trial"]]
+            values = [row["Rollout/Success_Rate"] for row in episodes]
+            rates = [sum(values[:i]) / i for i in range(1, 51)]
+            peak = max(rates)
+            self.assertEqual(trial["Trial/Peak_Running_Success_Rate"], peak)
+            self.assertEqual(trial["Trial/Peak_Running_Num_Rollouts"], rates.index(peak) + 1)
+            self.assertEqual(trial["Trial/Return_Max"], max(row["Rollout/Return"] for row in episodes))
+            self.assertEqual(trial["Trial/Success_Rate"], sum(values) / 50)
+        self.assertEqual(run.summary["Evaluation/Success_Rate_Max_Over_Trials"],
+                         max(row["Trial/Success_Rate"] for row in trials))
+        self.assertIn(("Trial/Success_Rate", {"step_metric": "trial", "summary": "max"}), run.definitions)
+
+    def test_completed_trial_csv_survives_failure_in_the_next_trial(self):
+        sdk = FakeWandb(self.evaluator)
+        args = self.args("trial-interrupt", "--wandb-project", "cami", "--n_trials", "2")
+        def failing_environment(*values, **kwargs):
+            policy, env, horizon = self.create_env(*values, **kwargs)
+            env.fail_at = 53
+            return policy, env, horizon
+        with self.assertRaisesRegex(KeyError, "simulator reset failed"):
+            self.evaluate(args, sdk, failing_environment)
+        folder = Path(args.results_dir) / "CaMI/checkpoint_env"
+        with (folder / "trial_results.csv").open() as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["num_rollouts"], "50")
+        with (folder / "rollout_results.csv").open() as stream:
+            self.assertEqual(len(list(csv.DictReader(stream))), 50)
+        self.assertEqual(sdk.runs[0].summary["Evaluation/Num_Rollouts"], 53)
+        self.assertFalse(sdk.runs[0].summary["Evaluation/Complete"])
 
     def test_defaults_and_underscore_aliases_remain_supported(self):
         parser = self.evaluator.build_parser()

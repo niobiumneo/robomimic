@@ -46,6 +46,9 @@ import robomimic.utils.tensor_utils as TensorUtils
 from robomimic.envs.env_base import EnvBase
 from robomimic.envs.wrappers import EnvWrapper
 from robomimic.algo import RolloutPolicy
+from robomimic.utils.eval_trial_statistics import (
+    completed_trial_statistics, define_trial_metrics, summarize_trial_rollouts, trial_log_values,
+)
 
 
 def safe_makedirs(path):
@@ -329,8 +332,7 @@ class WandbEvaluation:
                 self.run.define_metric("rollout")
                 self.run.define_metric("Rollout/*", step_metric="rollout")
                 self.run.define_metric("Running/*", step_metric="rollout")
-                self.run.define_metric("trial")
-                self.run.define_metric("Trial/*", step_metric="trial")
+                define_trial_metrics(self.run)
         except Exception as exc:
             if self.run is not None:
                 try:
@@ -378,12 +380,7 @@ class WandbEvaluation:
         }, video_path=video_path)
 
     def log_trial(self, row):
-        self.log({
-            "trial": row["trial"] + 1, "trial_seed": row["trial_seed"],
-            "Trial/Success_Rate": row["success_rate_mean"],
-            "Trial/Num_Success": row["num_success"], "Trial/Num_Rollouts": row["num_rollouts"],
-            "Trial/Return": row["return_mean"], "Trial/Horizon": row["horizon_mean"],
-        })
+        self.log(trial_log_values(row))
 
     def finish(self, trial_rows, rollout_rows, csv_paths, failed=False):
         if self.run is None:
@@ -400,8 +397,9 @@ class WandbEvaluation:
                                     "Evaluation/Horizon": self.horizons / self.completed})
                 self.run.summary.update(summary)
                 if trial_rows:
-                    self.run.summary["Evaluation/Success_Rate_Std_Over_Trials"] = float(
-                        np.std([row["success_rate_mean"] for row in trial_rows]))
+                    self.run.summary.update(completed_trial_statistics(trial_rows))
+                    # Keep the overall counters/means authoritative if a later trial was interrupted.
+                    self.run.summary.update(summary)
                 tables = {}
                 for name, rows in (("trial_results", trial_rows), ("rollout_results", rollout_rows)):
                     if rows:
@@ -488,23 +486,22 @@ def evaluate_one_model(ckpt_path, model_name, args, device):
                         per_rollout_rows[-1]["video"] = os.path.abspath(video) if video else ""
                     tracker.log_rollout(stats, trial_idx, rollout_idx, trial_seed, video_path=video)
 
-                stats_dict = TensorUtils.list_of_flat_dict_to_dict_of_list(trial_rollout_stats)
                 trial_summary = {
                     "model": model_name,
                     "env": env_tag,
                     "checkpoint": ckpt_path,
                     "trial": trial_idx,
                     "trial_seed": trial_seed,
-                    "num_rollouts": args.rollouts_per_trial,
-                    "success_rate_mean": float(np.mean(stats_dict["Success_Rate"])),
-                    "num_success": int(np.sum(stats_dict["Success_Rate"])),
-                    "return_mean": float(np.mean(stats_dict["Return"])),
-                    "return_std": float(np.std(stats_dict["Return"])),
-                    "horizon_mean": float(np.mean(stats_dict["Horizon"])),
-                    "horizon_std": float(np.std(stats_dict["Horizon"])),
+                    **summarize_trial_rollouts(trial_rollout_stats),
                 }
                 per_trial_rows.append(trial_summary)
                 tracker.log_trial(trial_summary)
+                # Save completed trials and rollouts at each boundary, including their peaks.
+                if model_env_dir is not None:
+                    write_csv(os.path.join(model_env_dir, "trial_results.csv"), per_trial_rows)
+                    write_csv(os.path.join(model_env_dir, "rollout_results.csv"), per_rollout_rows)
+                    csv_paths = [os.path.join(model_env_dir, "trial_results.csv"),
+                                 os.path.join(model_env_dir, "rollout_results.csv")]
 
             if model_env_dir is not None:
                 write_csv(os.path.join(model_env_dir, "trial_results.csv"), per_trial_rows)

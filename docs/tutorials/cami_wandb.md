@@ -109,6 +109,66 @@ The run also contains `trial_results` and `rollout_results` tables and an
 `evaluation` artifact containing the result CSVs. The same CSVs remain in
 `--results_dir`, including the existing per-model/environment folders.
 
+### Per-trial maximums and variability
+
+`run_trained_agent_multi_eval.py` logs the following when each trial completes.
+Plot these metrics against `trial` to compare repeated evaluations of the same
+checkpoint. Existing CSV columns are retained, with the new statistics added.
+Per-model/environment CSVs are saved after every completed trial, so completed
+trial results remain available if a later trial stops.
+
+| W&B metric | Meaning |
+| --- | --- |
+| `Trial/Success_Rate` | Final success fraction over the complete trial budget |
+| `Trial/Peak_Running_Success_Rate` | Maximum running success fraction within that trial |
+| `Trial/Peak_Running_Num_Rollouts`, `Trial/Peak_Running_Num_Success` | Rollouts and successes at the earliest occurrence of that peak |
+| `Trial/Return_Min`, `Trial/Return_Max`, `Trial/Return_Std` | Minimum, maximum and population SD of rollout returns |
+| `Trial/Horizon_Min`, `Trial/Horizon_Max`, `Trial/Horizon_Std` | Minimum, maximum and population SD of rollout lengths |
+
+The peak starts at the first rollout and resets for each trial. A successful
+first rollout therefore gives a peak of 100% after one rollout. To compare
+performance over a fixed budget, use the final trial rates and
+`Evaluation/Success_Rate_Max_Over_Trials`, the best completed trial rate.
+The run Summary also contains the minimum, mean, population SD, sample SD and
+SE over completed trial rates, plus `Evaluation/Best_Trial` and its seed.
+Sample SD and SE are absent for a single trial. W&B summary reducers retain
+min/max/mean for the main `Trial/` metrics as each trial finishes.
+
+An already-running evaluator keeps its loaded logger code. After it finishes,
+upload the additional statistics from its existing rollout CSV without running
+the policy or simulator again:
+
+```bash
+python -m robomimic.scripts.log_eval_trial_statistics \
+  --csv results/cami_best_eval_seed0_50_videos/CaMI/checkpoint_env/rollout_results.csv \
+  --rollouts-per-trial 50 \
+  --wandb-project cami-contact-state \
+  --wandb-name square-best-eval50-seed0-trial-stats
+```
+
+This creates a separate W&B analysis run with charts, a trial table and result
+artifacts. Local output is written beside the input CSV in `trial_statistics/`.
+Use `--wandb-mode disabled` for local-only calculations or `offline` for later
+sync. The uploader accepts either evaluator's rollout CSV; it recognizes
+zero-based multi-eval trials and one-based `train_trials` trials. If a CSV
+contains only later trials and numbering is ambiguous, set
+`--trial-index-base 0` or `--trial-index-base 1`. Output CSV trial IDs are
+normalized to zero-based; W&B displays the corresponding one-based trial IDs.
+Incomplete, duplicated or mixed-model/environment/checkpoint inputs are
+rejected before anything is logged.
+
+The existing root-level `stitch_rollout_videos.py` combines the recorded clips
+across trials with separate success/failure videos and CSV timestamp indexes:
+
+```bash
+python stitch_rollout_videos.py \
+  results/cami_best_eval_seed0_50_videos/CaMI/checkpoint_env/videos
+```
+
+Compilations go in `videos/stitched/`; `--output-dir` chooses another location.
+Use `--overwrite` to replace an earlier compilation. Only labeled rollout
+clips are included; existing compilations are skipped.
+
 `--wandb-project` enables tracking; `--wandb` enables it with the default
 `cami-contact-state` project. `--wandb-entity` selects an account/team and
 `--wandb-group` groups comparisons. Multiple checkpoints or environments create

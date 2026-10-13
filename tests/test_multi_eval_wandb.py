@@ -432,6 +432,80 @@ class EvaluationWandbTests(unittest.TestCase):
         self.assertEqual(sdk.runs[0].summary["Evaluation/Num_Rollouts"], 53)
         self.assertFalse(sdk.runs[0].summary["Evaluation/Complete"])
 
+    def test_trial_statistics_stream_after_every_rollout_and_reset_per_trial(self):
+        sdk = FakeWandb(self.evaluator)
+        self.evaluate(self.args("live-trial-stats", "--wandb-project", "cami",
+                                "--n_trials", "2", "--rollouts_per_trial", "4"), sdk)
+        run = sdk.runs[0]
+        episodes = [row for row in run.history if "Rollout/Success_Rate" in row]
+        self.assertEqual(len(episodes), 8)
+        for trial in (1, 2):
+            rows = [row for row in episodes if row["trial"] == trial]
+            for count, row in enumerate(rows, 1):
+                prefix = rows[:count]
+                successes = [item["Rollout/Success_Rate"] for item in prefix]
+                rates = [sum(successes[:i]) / i for i in range(1, count + 1)]
+                self.assertEqual(row["TrialRunning/Num_Rollouts"], count)
+                self.assertEqual(row["TrialRunning/Success_Rate"], sum(successes) / count)
+                self.assertEqual(row["TrialRunning/Peak_Running_Success_Rate"], max(rates))
+                self.assertEqual(row["TrialRunning/Peak_Running_Num_Rollouts"], rates.index(max(rates)) + 1)
+                self.assertEqual(row["TrialRunning/Return_Max"], max(item["Rollout/Return"] for item in prefix))
+                self.assertAlmostEqual(row["TrialRunning/Return_Std"],
+                                       np.std([item["Rollout/Return"] for item in prefix]))
+                self.assertNotIn("Trial/Success_Rate", row)
+        self.assertIn(("TrialRunning/*", {"step_metric": "rollout"}), run.definitions)
+
+    def test_best_trial_summary_is_visible_before_the_next_trial_starts(self):
+        sdk = FakeWandb(self.evaluator)
+        snapshots = []
+        def observing_environment(*values, **kwargs):
+            policy, env, horizon = self.create_env(*values, **kwargs)
+            original_reset = env.reset
+            def reset():
+                if len(env.placements) == 4:
+                    snapshots.append(sdk.runs[0].summary.copy())
+                return original_reset()
+            env.reset = reset
+            return policy, env, horizon
+        self.evaluate(self.args("live-summary", "--wandb-project", "cami",
+                                "--n_trials", "2", "--rollouts_per_trial", "4"),
+                      sdk, observing_environment)
+        self.assertEqual(len(snapshots), 1)
+        first_trial = next(row for row in sdk.runs[0].history if "Trial/Success_Rate" in row)
+        self.assertEqual(snapshots[0]["Evaluation/Num_Trials"], 1)
+        self.assertEqual(snapshots[0]["Evaluation/Num_Rollouts"], 4)
+        self.assertEqual(snapshots[0]["Evaluation/Best_Trial"], 1)
+        self.assertEqual(snapshots[0]["Evaluation/Success_Rate_Max_Over_Trials"],
+                         first_trial["Trial/Success_Rate"])
+
+    def test_trial_summary_connection_failure_preserves_rollouts_and_csvs(self):
+        baseline = self.args("summary-baseline", "--n_trials", "2", "--rollouts_per_trial", "4")
+        self.evaluate(baseline)
+        expected_placements = self.envs[-1].placements.copy()
+        sdk = FakeWandb(self.evaluator)
+        original_init = sdk.init
+        class Summary(dict):
+            failed_once = False
+            def update(self, *args, **kwargs):
+                sdk.consume_random()
+                if not self.failed_once:
+                    self.failed_once = True
+                    raise RuntimeError("trial summary connection lost")
+                return super().update(*args, **kwargs)
+        def init(**kwargs):
+            run = original_init(**kwargs)
+            run.summary = Summary()
+            return run
+        sdk.init = init
+        args = self.args("summary-failure", "--wandb-project", "cami",
+                         "--n_trials", "2", "--rollouts_per_trial", "4")
+        self.evaluate(args, sdk)
+        self.assertEqual(self.envs[-1].placements, expected_placements)
+        self.assertEqual(len(self.csv_rows(args, "rollout_results.csv")[1]), 8)
+        self.assertEqual(len(self.csv_rows(args, "trial_results.csv")[1]), 2)
+        self.assertEqual(sdk.runs[0].summary["Evaluation/Num_Rollouts"], 8)
+        self.assertEqual(sdk.runs[0].exit_code, 1)
+
     def test_defaults_and_underscore_aliases_remain_supported(self):
         parser = self.evaluator.build_parser()
         defaults = parser.parse_args(["--agents", "model.pth"])

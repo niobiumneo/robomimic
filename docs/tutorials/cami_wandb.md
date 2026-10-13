@@ -113,7 +113,9 @@ The run also contains `trial_results` and `rollout_results` tables and an
 
 `run_trained_agent_multi_eval.py` logs the following when each trial completes.
 Plot these metrics against `trial` to compare repeated evaluations of the same
-checkpoint. Existing CSV columns are retained, with the new statistics added.
+checkpoint. This happens in the evaluation loop automatically when W&B is
+enabled; no separate statistics command is needed for new evaluations.
+Existing CSV columns are retained, with the new statistics added.
 Per-model/environment CSVs are saved after every completed trial, so completed
 trial results remain available if a later trial stops.
 
@@ -133,6 +135,16 @@ The run Summary also contains the minimum, mean, population SD, sample SD and
 SE over completed trial rates, plus `Evaluation/Best_Trial` and its seed.
 Sample SD and SE are absent for a single trial. W&B summary reducers retain
 min/max/mean for the main `Trial/` metrics as each trial finishes.
+
+While a trial is in progress, the evaluator logs `TrialRunning/Success_Rate`,
+`TrialRunning/Peak_Running_Success_Rate`, the counts at the peak, and
+`TrialRunning/Return_*` and `TrialRunning/Horizon_*` statistics after every
+rollout. These series use the global `rollout` x-axis and reset their accumulated
+values at each trial boundary; `trial` and `episode_in_trial` identify the
+active trial and its local progress. The completed-trial summary, including
+`Evaluation/Success_Rate_Max_Over_Trials` and `Evaluation/Best_Trial`, is updated
+immediately after each trial completes, so it is available before the entire
+evaluation finishes. `Trial/*` metrics always use the full trial budget.
 
 An already-running evaluator keeps its loaded logger code. After it finishes,
 upload the additional statistics from its existing rollout CSV without running

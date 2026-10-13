@@ -47,7 +47,8 @@ from robomimic.envs.env_base import EnvBase
 from robomimic.envs.wrappers import EnvWrapper
 from robomimic.algo import RolloutPolicy
 from robomimic.utils.eval_trial_statistics import (
-    completed_trial_statistics, define_trial_metrics, summarize_trial_rollouts, trial_log_values,
+    TRIAL_METRICS, completed_trial_statistics, define_trial_metrics,
+    summarize_trial_rollouts, trial_log_values,
 )
 
 
@@ -296,6 +297,9 @@ class WandbEvaluation:
         self.successes = 0.0
         self.returns = 0.0
         self.horizons = 0
+        self.current_trial_index = None
+        self.current_trial_rollouts = []
+        self.completed_trial_rows = []
         self.logging_error = False
         self.wandb_videos = getattr(args, "wandb_videos", False)
         mode = getattr(args, "wandb_mode", os.environ.get("WANDB_MODE", "online"))
@@ -332,6 +336,7 @@ class WandbEvaluation:
                 self.run.define_metric("rollout")
                 self.run.define_metric("Rollout/*", step_metric="rollout")
                 self.run.define_metric("Running/*", step_metric="rollout")
+                self.run.define_metric("TrialRunning/*", step_metric="rollout")
                 define_trial_metrics(self.run)
         except Exception as exc:
             if self.run is not None:
@@ -368,6 +373,18 @@ class WandbEvaluation:
         self.successes += stats["Success_Rate"]
         self.returns += stats["Return"]
         self.horizons += stats["Horizon"]
+        trial_values = {}
+        if self.run is not None and not self.logging_error:
+            if self.current_trial_index != trial_idx:
+                self.current_trial_index = trial_idx
+                self.current_trial_rollouts = []
+            self.current_trial_rollouts.append({
+                key: stats[key] for key in ("Success_Rate", "Return", "Horizon")
+            })
+            # These are prefixes of the active trial; Trial/* stays fixed-budget.
+            trial_stats = summarize_trial_rollouts(self.current_trial_rollouts)
+            trial_values = {"TrialRunning/" + name: trial_stats[field]
+                            for name, field in TRIAL_METRICS.items()}
         self.log({
             "rollout": self.completed, "trial": trial_idx + 1,
             "episode_in_trial": rollout_idx + 1, "trial_seed": trial_seed,
@@ -377,10 +394,21 @@ class WandbEvaluation:
             "Running/Num_Success": self.successes,
             "Running/Return": self.returns / self.completed,
             "Running/Horizon": self.horizons / self.completed,
+            **trial_values,
         }, video_path=video_path)
 
     def log_trial(self, row):
+        self.completed_trial_rows.append(row.copy())
         self.log(trial_log_values(row))
+        if self.run is None or self.logging_error:
+            return
+        try:
+            with preserve_random_state():
+                self.run.summary.update(completed_trial_statistics(self.completed_trial_rows))
+        except Exception as exc:
+            self.logging_error = True
+            print("W&B trial summary update failed ({}). Evaluation continues; results are saved to CSV.".format(
+                exc), flush=True)
 
     def finish(self, trial_rows, rollout_rows, csv_paths, failed=False):
         if self.run is None:

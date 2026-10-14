@@ -50,7 +50,7 @@ def prepare_dataset(dataset, output, mode="physics", horizon=10, force_key="obs/
                     normal_force_key=None, tangential_force_key=None, impulse_dt=None,
                     contact_key=None, contact_features=None, valid_key=None, raw_dataset=None,
                     pairs=None, max_gap=.02, replay_tolerance=1e-3, binary_threshold=10.,
-                    validation_fraction=.1, split_seed=1, quiet=False):
+                    validation_fraction=.1, split_seed=1, quiet=False, replay_mode="action"):
     source, destination = Path(dataset).expanduser().resolve(), Path(output).expanduser().resolve()
     if not source.is_file() or destination.exists() or source == destination:
         raise ValueError("Input must exist; output must be a new, different path")
@@ -62,6 +62,8 @@ def prepare_dataset(dataset, output, mode="physics", horizon=10, force_key="obs/
         raise ValueError("Invalid descriptor mode, horizon, threshold, gap cap, or split")
     if impulse_dt is not None and (not math.isfinite(impulse_dt) or impulse_dt <= 0):
         raise ValueError("impulse_dt must be finite and positive")
+    if replay_mode not in ("action", "state") or (replay_mode == "state" and (not pairs or mode != "physics")):
+        raise ValueError("State-aligned replay requires --pairs and --mode physics")
     names = FEATURE_SETS[mode]
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=destination.name + ".", suffix=".tmp", dir=destination.parent)
@@ -99,7 +101,8 @@ def prepare_dataset(dataset, output, mode="physics", horizon=10, force_key="obs/
                     if src["actions"].shape != demo["actions"].shape or not np.allclose(
                             src["actions"][()], demo["actions"][()], rtol=0, atol=1e-6):
                         raise ValueError("Raw/extracted action mismatch in {}".format(name))
-                    values, details = replay_descriptors(env, src, pairs, max_gap, replay_tolerance)
+                    values, details = replay_descriptors(env, src, pairs, max_gap, replay_tolerance,
+                                                        replay_mode=replay_mode)
                     dt = details["interval_dt"]
                     source_valid = details.pop("_valid")
                     if not np.allclose(details["interval_dt_range"], dt, rtol=1e-6, atol=1e-9):
@@ -182,6 +185,18 @@ def prepare_dataset(dataset, output, mode="physics", horizon=10, force_key="obs/
                 binary_feature="normal_impulse" if mode == "physics" else "force",
                 binary_threshold=binary_threshold * common_dt if mode == "physics" else binary_threshold,
                 binary_threshold_units="N*s" if mode == "physics" else "N")
+            if pairs:
+                report["reconstruction"] = dict(
+                    replay_mode=replay_mode,
+                    impulse_semantics=("state_conditioned_simulator_estimate" if replay_mode == "state"
+                                       else "open_loop_simulator_reconstruction"),
+                    mujoco_version=details["mujoco_version"],
+                    robosuite_version=details["robosuite_version"],
+                    max_qpos_replay_error=max(d["max_qpos_replay_error"] for d in report["demos"].values()),
+                    checked_transitions=sum(d["checked_transitions"] for d in report["demos"].values()),
+                    transitions_over_tolerance=sum(d["transitions_over_tolerance"] for d in report["demos"].values()),
+                    replay_tolerance=replay_tolerance,
+                )
             for demo in file["data"].values():
                 demo.attrs["cami_c"] = json.dumps({k:v for k,v in report.items() if k != "demos"})
             file["data"].attrs["cami_c"] = json.dumps(report)
@@ -209,6 +224,8 @@ def main():
     p.add_argument("--contact-features", nargs="+")
     p.add_argument("--impulse-dt", type=float, help="Duration in seconds represented by each impulse row")
     p.add_argument("--raw-dataset"); p.add_argument("--pairs", help="JSON geometry groups, enables action replay")
+    p.add_argument("--replay-mode", choices=("action", "state"), default="action",
+                   help="action: strict open-loop replay; state: restore each saved state and estimate contact impulses")
     p.add_argument("--max-gap", type=float, default=.02); p.add_argument("--replay-tolerance", type=float, default=1e-3)
     p.add_argument("--binary-threshold", type=float, default=10., help="Force threshold N; converted to N*s in physics mode")
     p.add_argument("--validation-fraction", type=float, default=.1); p.add_argument("--split-seed", type=int, default=1)
@@ -216,10 +233,18 @@ def main():
     args = vars(p.parse_args())
     if args["pairs"]:
         args["pairs"] = json.loads(Path(args["pairs"]).read_text())
+    if args["replay_mode"] == "state":
+        print("State-aligned reconstruction: impulses are simulator estimates. "
+              "One-step drift is reported and stored in the output metadata.", flush=True)
     report = prepare_dataset(**args)
     print("Created {} | features={} | horizon={} | train={} | valid={}".format(
         args["output"], report["feature_names"], report["horizon"],
         len(report["splits"]["train"]), len(report["splits"]["valid"])))
+    if "reconstruction" in report:
+        reconstruction = report["reconstruction"]
+        print("Replay mode={} | max qpos drift={:.6g} | transitions above tolerance={}/{}".format(
+            reconstruction["replay_mode"], reconstruction["max_qpos_replay_error"],
+            reconstruction["transitions_over_tolerance"], reconstruction["checked_transitions"]))
 
 
 if __name__ == "__main__":

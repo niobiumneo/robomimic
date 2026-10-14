@@ -55,6 +55,8 @@ class BCCaMIContactNetsConfig(BCCaMIConfig):
         c.tangential_impulse_scale = None
         c.normalization_fit_demos = []
         c.normalization_method = "selected_training_std"
+        # Populated from prepared HDF5 metadata and saved with the trained model.
+        c.dataset_reconstruction = []
         c.binary_feature = "normal_impulse"
         c.binary_threshold = 0.
         c.contact_temperature = .05

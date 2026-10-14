@@ -227,34 +227,96 @@ def reset_demo(env, demo):
             controller.reset_goal()
 
 
-def replay_descriptors(env, demo, specification, max_gap=.02, tolerance=1e-3):
-    """Replay original actions without per-step teleports; reject qpos drift.
+def replay_descriptors(env, demo, specification, max_gap=.02, tolerance=1e-3,
+                       *, replay_mode="action"):
+    """Integrate solver contact impulses along replayed action intervals.
 
-    Matching qpos is a consistency check, not proof of original force recovery.
-    Controller memory, solver settings, and simulator version must also match.
+    ``action`` is strict open-loop replay and rejects trajectory drift.
+    ``state`` restores each recorded state before applying its action, refreshes
+    controller goals, and reports the one-step drift instead. Its gap is from
+    the recorded geometry; its impulses are state-conditioned simulator
+    estimates, not recovered original measurements. No force-times-dt shortcut
+    is used. Neither mode can restore unrecorded solver or controller memory.
     """
+    if replay_mode not in ("action", "state") or not np.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("Replay mode must be action or state, with a finite nonnegative tolerance")
     reset_demo(env, demo)
     sim = env.env.sim
     model, data = native_model_data(sim)
+    states = np.asarray(demo["states"])
+    actions = demo["actions"]
+    state_width = 1 + model.nq + model.nv
+    if (states.ndim != 2 or states.shape[0] not in (len(actions), len(actions) + 1)
+            or states.shape[1] != state_width or not np.isfinite(states).all()):
+        raise ValueError("Recorded states must be finite [T,1+nq+nv] or [T+1,1+nq+nv]")
+    if not np.isfinite(actions[()]).all():
+        raise ValueError("Recorded actions must be finite")
+    if len(states) > 1 and np.any(np.diff(states[:, 0]) <= 0):
+        raise ValueError("Recorded simulator times must increase between action intervals")
     pairs = resolve_pairs(model, specification)
     probe = ContinuousContactProbe(model, data, pairs, max_gap)
-    values, masks, durations, maximum_error = [], [], [], 0.
-    for t, action in enumerate(demo["actions"]):
-        # Robosuite flattened state layout: time, qpos, qvel, act.
-        expected = np.asarray(demo["states"][t])[1:1 + model.nq]
-        if expected.shape != data.qpos.shape:
-            raise ValueError("Stored state layout/model does not match replay environment")
-        error = float(np.max(np.abs(data.qpos - expected)))
-        maximum_error = max(maximum_error, error)
-        if not np.isfinite(error) or error > tolerance:
+    values, masks, durations, errors = [], [], [], []
+
+    def qpos_error(index):
+        error = float(np.max(np.abs(data.qpos - states[index, 1:1 + model.nq])))
+        if not np.isfinite(error):
+            raise ValueError("Nonfinite replay joint configuration at t={}".format(index))
+        return error
+
+    def check_drift(error, index):
+        if error > tolerance:
             raise ValueError("Replay diverged at t={}: qpos max error {:.6g} > {}. "
-                             "Match the collection environment or log descriptors directly.".format(t, error, tolerance))
+                             "Match the collection environment, record descriptors directly, or explicitly "
+                             "use --replay-mode state for simulator-estimated impulses."
+                             .format(index, error, tolerance))
+
+    check_drift(qpos_error(0), 0)
+    for t, action in enumerate(actions):
+        if replay_mode == "state":
+            # Do not let open-loop drift accumulate or move a descriptor away
+            # from the source images. Warm starts are not in flattened states;
+            # use a deterministic zero warm start for each estimated interval.
+            data.qacc_warmstart[:] = 0.
+            env.reset_to({"states": states[t]})
+            for robot in env.env.robots:
+                controllers = getattr(robot, "part_controllers", None)
+                if controllers is None:
+                    controller = getattr(robot, "controller", None)
+                    controllers = {} if controller is None else {"arm": controller}
+                for controller in controllers.values():
+                    controller.update(force=True)
+                    controller.reset_goal()
+            if qpos_error(t) > 1e-10:
+                raise ValueError("Failed to restore recorded joint configuration at t={}".format(t))
         sim.forward()
         _, measured = step_with_contact(env, action, probe, record_contacts=False)
+        if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
+            raise ValueError("Nonfinite simulator state after action t={}".format(t))
+        if t + 1 < len(states):
+            recorded_dt = float(states[t + 1, 0] - states[t, 0])
+            if not np.isclose(measured["dt"], recorded_dt, rtol=1e-6, atol=1e-9):
+                raise ValueError("Replay action interval {} does not match recorded interval {} at t={}"
+                                 .format(measured["dt"], recorded_dt, t))
+            error = qpos_error(t + 1)
+            errors.append(error)
+            if replay_mode == "action":
+                check_drift(error, t + 1)
         values.append(measured["physics"])
         masks.append(measured["valid"])
         durations.append(measured["dt"])
-    return np.asarray(values), {"pairs": pairs, "max_qpos_replay_error": maximum_error,
-                               "source": "action_replay_substep_integrated_contact", "_valid": np.asarray(masks),
+    source = ("state_aligned_action_simulation" if replay_mode == "state"
+              else "action_replay_substep_integrated_contact")
+    return np.asarray(values), {"pairs": pairs, "max_qpos_replay_error": max(errors, default=0.),
+                               "mean_qpos_replay_error": float(np.mean(errors)) if errors else 0.,
+                               "checked_transitions": len(errors),
+                               "transitions_over_tolerance": sum(error > tolerance for error in errors),
+                               "replay_mode": replay_mode, "replay_tolerance": tolerance,
+                               "gap_semantics": ("recorded_state_geometry" if replay_mode == "state"
+                                                 else "replayed_state_geometry"),
+                               "impulse_semantics": ("state_conditioned_simulator_estimate" if replay_mode == "state"
+                                                     else "open_loop_simulator_reconstruction"),
+                               "mujoco_version": probe.mj.__version__,
+                               "robosuite_version": getattr(env, "version", None),
+                               "source": source, "_valid": np.asarray(masks),
                                "interval_dt": float(durations[0]),
                                "interval_dt_range": [float(min(durations)), float(max(durations))]}

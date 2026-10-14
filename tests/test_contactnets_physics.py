@@ -124,6 +124,72 @@ def test_replay_preparation_and_atomic_failure(tmp_path, monkeypatch):
     assert not list(tmp_path.glob('bad.hdf5.*.tmp'))
 
 
+def test_state_aligned_reconstruction_restores_anchors_and_reports_drift(tmp_path, monkeypatch):
+    source, output = tmp_path / 'source.hdf5', tmp_path / 'state_aligned.hdf5'
+    recorded_dataset(source)
+    monkeypatch.setattr(physics, 'make_replay_env', lambda group: Env())
+    # A saved state inconsistent with open-loop replay must not move later
+    # estimated intervals away from their own recorded anchors.
+    with h5py.File(source, 'a') as f:
+        f['data/demo_0/states'][3, 2] += .01
+    report = prepare_dataset(source, output, mode='physics', pairs=PAIRS,
+                             horizon=10, replay_mode='state', quiet=True)
+    reconstruction = report['reconstruction']
+    assert reconstruction['replay_mode'] == 'state'
+    assert reconstruction['impulse_semantics'] == 'state_conditioned_simulator_estimate'
+    assert reconstruction['transitions_over_tolerance'] > 0
+    assert reconstruction['checked_transitions'] == 12
+    assert reconstruction['max_qpos_replay_error'] > .001
+    assert reconstruction['mujoco_version'] == mujoco.__version__
+    with h5py.File(source) as f:
+        demo = f['data/demo_0']
+        original_states = demo['states'][()]
+        values, details = physics.replay_descriptors(Env(), demo, PAIRS, replay_mode='state')
+        assert details['gap_semantics'] == 'recorded_state_geometry'
+        reference = Env()
+        sim = reference.env.sim
+        probe = physics.ContinuousContactProbe(sim.model, sim.data,
+                                              physics.resolve_pairs(sim.model, PAIRS))
+        for t, action in enumerate(demo['actions']):
+            sim.data.qacc_warmstart[:] = 0.
+            reference.reset_to({'states': original_states[t]})
+            expected_gap = probe.gap()
+            reference.env.sim.data.ctrl[:] = action
+            expected_impulses = np.zeros(2)
+            for _ in range(5):
+                sim.step()
+                for contact in probe.contacts():
+                    expected_impulses += .002 * np.array([
+                        max(0., contact['wrench'][0]), np.linalg.norm(contact['wrench'][1:3])])
+            np.testing.assert_allclose(values[t], np.r_[expected_gap, expected_impulses],
+                                       rtol=1e-6, atol=1e-8)
+        assert 'contact_state' not in demo
+        np.testing.assert_array_equal(demo['states'][()], original_states)
+    with h5py.File(output) as f:
+        stored = json.loads(f['data'].attrs['cami_c'])
+        assert stored['reconstruction'] == reconstruction
+        np.testing.assert_allclose(f['data/demo_0/contact_state'][0], values[1:11])
+        assert not f['data/demo_0/contact_mask'][-1].any()
+
+
+@pytest.mark.parametrize('replay_mode', ['action', 'state'])
+def test_replay_rejects_mismatched_action_timing(tmp_path, replay_mode):
+    source = tmp_path / 'source.hdf5'
+    recorded_dataset(source)
+    with h5py.File(source, 'a') as f:
+        f['data/demo_0/states'][:, 0] *= 2.
+        with pytest.raises(ValueError, match='does not match recorded interval'):
+            physics.replay_descriptors(Env(), f['data/demo_0'], PAIRS, replay_mode=replay_mode)
+
+
+def test_state_reconstruction_requires_physics_pairs(tmp_path):
+    source = tmp_path / 'source.hdf5'
+    recorded_dataset(source)
+    with pytest.raises(ValueError, match='State-aligned replay requires'):
+        prepare_dataset(source, tmp_path / 'output.hdf5', mode='force', replay_mode='state')
+    assert not (tmp_path / 'output.hdf5').exists()
+
+
 def test_huber_weights_and_gradient_paths():
     labels = torch.tensor([[[0., 0., 0.]], [[.2, .2, .2]]], requires_grad=True)
     normalized = normalize_contact(labels, ['gap', 'normal_impulse', 'tangential_impulse_magnitude'],

@@ -56,8 +56,39 @@ version, controller and simulation settings, and per-demo `states` and
 `--raw-dataset /path/to/the/original_demonstrations.hdf5`. The raw and image
 files must have identical demo names and actions. Replay checks qpos drift
 against the recorded states and aborts on a mismatch; it does not teleport
-between action steps. Matching qpos is a consistency check and does not prove
-that the original contact forces have been recovered.
+between action steps in the default `--replay-mode action`. Matching qpos is
+a consistency check and does not prove that the original contact forces have
+been recovered.
+
+If strict replay diverges, an explicit alternative is state-aligned
+reconstruction. This restores the recorded qpos/qvel at every action boundary,
+refreshes controller goals, then simulates that action and integrates contact
+forces across its physics substeps. It prevents accumulated trajectory drift
+from misaligning the labels with the source observations. The gap comes from
+the recorded configuration; the impulses are **state-conditioned simulator
+estimates**, with the current model, solver, and reset controller state. This
+does not recover unrecorded controller memory or original contact impulses.
+It is a different reconstruction assumption, not a larger replay tolerance.
+
+```bash
+python -m robomimic.scripts.prepare_cami_c_dataset \
+  --dataset dataset/square_image_84_with_force.hdf5 \
+  --output dataset/square_image_84_contactnets_state.hdf5 \
+  --mode physics \
+  --pairs robomimic/exps/cami_c/square_pairs.json \
+  --replay-mode state \
+  --horizon 10 \
+  --quiet
+```
+
+The preparer reports one-step qpos drift and stores its maximum, the count of
+transitions exceeding the unchanged tolerance, simulator versions, and the
+impulse-estimation semantics in `data.attrs['cami_c']['reconstruction']`.
+Recorded action intervals must still match simulated durations, and nonfinite
+states still fail. Training preserves this provenance in the resolved config.
+Use the output above as the training command's `--dataset` when choosing this
+mode. In a paper, describe the labels as simulator-estimated impulses from
+state-aligned action intervals, rather than recorded impulses.
 
 For already recorded `contact/physics` rows, each with feature order
 `[gap, normal_impulse, tangential_impulse_magnitude]` and `contact/dt`:

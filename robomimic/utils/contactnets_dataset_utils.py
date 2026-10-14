@@ -66,6 +66,7 @@ def prepare_contactnets_datasets(config):
     count = np.zeros(3, dtype=np.int64)
     mean, m2 = np.zeros(3), np.zeros(3)
     fit_demos, shapes, common_dt = [], {}, None
+    reconstruction = []
     for entry in entries:
         with h5py.File(entry["path"], "r") as hdf5:
             if "data" not in hdf5 or "env_args" not in hdf5["data"].attrs:
@@ -76,6 +77,8 @@ def prepare_contactnets_datasets(config):
             if not all(key in env_meta for key in ("env_name", "type", "env_kwargs")):
                 raise ValueError("{}: incomplete environment metadata".format(entry["path"]))
             meta = json.loads(hdf5["data"].attrs.get("cami_c", "{}"))
+            if "reconstruction" in meta:
+                reconstruction.append(dict(meta["reconstruction"], dataset=entry["path"]))
             if (meta.get("schema_version") != SCHEMA_VERSION or meta.get("feature_names") != names
                     or meta.get("horizon") != horizon or meta.get("future_start") != 1
                     or meta.get("units") != ["m", "N*s", "N*s"]):
@@ -160,6 +163,7 @@ def prepare_contactnets_datasets(config):
                     fit_demos.append(entry["path"] + "#" + name)
     with config.values_unlocked():
         c.privileged_obs_keys = sorted(forbidden)
+        c.dataset_reconstruction = reconstruction
         if any(fit):
             for i, (key, fitting) in enumerate(zip(SCALE_KEYS, fit)):
                 if fitting:

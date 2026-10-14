@@ -112,6 +112,22 @@ def test_training_only_scales_and_alignment(physics_dataset):
     assert all('demo_2' not in name for name in c.normalization_fit_demos)
 
 
+def test_training_config_preserves_reconstruction_provenance(physics_dataset):
+    provenance = {'replay_mode': 'state',
+                  'impulse_semantics': 'state_conditioned_simulator_estimate',
+                  'max_qpos_replay_error': .0034,
+                  'transitions_over_tolerance': 1}
+    with h5py.File(physics_dataset, 'a') as f:
+        meta = json.loads(f['data'].attrs['cami_c'])
+        meta['reconstruction'] = provenance
+        f['data'].attrs['cami_c'] = json.dumps(meta)
+    config = config_for(physics_dataset)
+    config.lock()
+    cami_dataset_utils.prepare_cami_datasets(config)
+    saved = config.to_dict()['algo']['cami']['continuous']['dataset_reconstruction']
+    assert saved == [dict(provenance, dataset=str(physics_dataset))]
+
+
 @pytest.mark.parametrize('corruption, message', [
     ('missing', 'contact_state'), ('features', 'incompatible physics'),
     ('padding', 'padded future'), ('negative', 'nonnegative'), ('nan', 'nonfinite'),

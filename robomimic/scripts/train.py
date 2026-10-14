@@ -46,8 +46,8 @@ import robomimic.utils.lang_utils as LangUtils
 from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
-# from robomimic.CAMI.force_modality import ForceModality
-# from robomimic.CAMI.force_encoder import ForceEncoderCore
+from robomimic.CAMI.force_modality import ForceModality
+from robomimic.CAMI.force_encoder import ForceEncoderCore
 
 def compute_force_stats(hdf5_path):
     all_force = []

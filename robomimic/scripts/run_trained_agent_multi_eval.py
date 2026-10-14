@@ -5,6 +5,7 @@ New features:
 - evaluate multiple models in one run
 - run multiple trials per model
 - compute per-trial success-rate distributions
+- log live and completed-trial mean/peak metrics and the mean across completed trials
 - save trial-level and rollout-level CSV files for box plots / repeatability analysis
 - optionally stream rollout metrics and upload result CSVs to W&B
 - save a successful or failed MP4 for each episode with --save-videos
@@ -338,6 +339,7 @@ class WandbEvaluation:
                 self.run.define_metric("Running/*", step_metric="rollout")
                 self.run.define_metric("TrialRunning/*", step_metric="rollout")
                 define_trial_metrics(self.run)
+                self.run.define_metric("AcrossTrials/*", step_metric="trial")
         except Exception as exc:
             if self.run is not None:
                 try:
@@ -385,6 +387,11 @@ class WandbEvaluation:
             trial_stats = summarize_trial_rollouts(self.current_trial_rollouts)
             trial_values = {"TrialRunning/" + name: trial_stats[field]
                             for name, field in TRIAL_METRICS.items()}
+            trial_values.update({
+                "TrialRunning/Success_Rate_Mean": trial_stats["success_rate_mean"],
+                "TrialRunning/Return_Mean": trial_stats["return_mean"],
+                "TrialRunning/Horizon_Mean": trial_stats["horizon_mean"],
+            })
         self.log({
             "rollout": self.completed, "trial": trial_idx + 1,
             "episode_in_trial": rollout_idx + 1, "trial_seed": trial_seed,
@@ -399,7 +406,15 @@ class WandbEvaluation:
 
     def log_trial(self, row):
         self.completed_trial_rows.append(row.copy())
-        self.log(trial_log_values(row))
+        values = trial_log_values(row)
+        values["Trial/Success_Rate_Mean"] = row["success_rate_mean"]
+        values["Trial/Return_Mean"] = row["return_mean"]
+        values["Trial/Horizon_Mean"] = row["horizon_mean"]
+        values["AcrossTrials/Success_Rate_Mean"] = float(np.mean([
+            trial["success_rate_mean"]
+            for trial in self.completed_trial_rows
+        ]))
+        self.log(values)
         if self.run is None or self.logging_error:
             return
         try:

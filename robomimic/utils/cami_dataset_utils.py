@@ -11,7 +11,8 @@ import h5py
 import numpy as np
 
 
-CAMI_ALGOS = {"bc_cami", "bc_cami_lcp", "bc_cami_cance"}
+FORCE_CAMI_ALGOS = {"bc_cami", "bc_cami_contactNets"}
+CAMI_ALGOS = FORCE_CAMI_ALGOS | {"bc_cami_lcp", "bc_cami_cance"}
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -88,13 +89,13 @@ def prepare_cami_datasets(config):
         return
     train = config.train
     cami = config.algo.cami
-    lcp = config.algo_name != "bc_cami"
+    lcp = config.algo_name not in FORCE_CAMI_ALGOS
     continuous = (not lcp and cami.get("enabled", False)
                   and cami.get("continuous_contact", {}).get("enabled", False))
     force_key = (cami.lcp.force_dataset_key if lcp else
                  cami.continuous_contact.force_dataset_key if continuous else None)
     label_key = None
-    if config.algo_name == "bc_cami" and cami.get("enabled", False) and not continuous:
+    if config.algo_name in FORCE_CAMI_ALGOS and cami.get("enabled", False) and not continuous:
         label_key = cami.get("contact_label_key", "contact_label")
     elif config.algo_name == "bc_cami_cance" and cami.lcp.negative_mode == "regime":
         label_key = "contact_label"

@@ -23,6 +23,7 @@ import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.lang_utils as LangUtils
 
 from robomimic.utils.dataset import SequenceDataset, MetaDataset
+from robomimic.utils.cami_dataset_utils import FORCE_CAMI_ALGOS
 from robomimic.envs.env_base import EnvBase
 from robomimic.envs.wrappers import EnvWrapper
 from robomimic.algo import RolloutPolicy
@@ -169,7 +170,7 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         # Repeated boundary samples must not enter the force distance.
         # Other algorithms retain their existing loader behavior.
         get_pad_mask=(
-            config.algo_name == "bc_cami"
+            config.algo_name in FORCE_CAMI_ALGOS
             and config.algo.cami.get("continuous_contact", {}).get("enabled", False)
         ),
         goal_mode=config.train.goal_mode,

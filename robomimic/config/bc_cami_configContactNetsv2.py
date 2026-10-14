@@ -7,8 +7,8 @@ from copy import deepcopy
 from robomimic.config.bc_config import BCConfig
 
 
-class BCCaMIConfig(BCConfig):
-    ALGO_NAME = "bc_cami"
+class BCCaMIContactNetsConfig(BCConfig):
+    ALGO_NAME = "bc_cami_contactNets"
 
     def train_config(self):
         super().train_config()

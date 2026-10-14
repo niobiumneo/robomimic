@@ -1,3 +1,10 @@
+"""ContactNets experiment entry point and the separate version-7 CaMI-C model.
+
+The ContactNets force template uses cami.continuous_contact and obs/force,
+which the shared BC_CaMI implementation consumes. The version-7 model below
+uses cami.continuous with precomputed contact_state/contact_mask instead.
+"""
+
 from collections import OrderedDict
 import copy
 import math
@@ -15,6 +22,15 @@ from robomimic.CAMI.continuous_contact import (
     weighted_infonce,
 )
 import robomimic.utils.tensor_utils as TensorUtils
+
+
+@register_algo_factory_func("bc_cami_contactNets")
+def contactnets_config_to_class(algo_config):
+    return BC_CaMI_ContactNets, {}
+
+
+class BC_CaMI_ContactNets(BC_CaMI):
+    """Use the force-weighted CaMI path configured by the ContactNets template."""
 
 
 @register_algo_factory_func("bc_cami_c")

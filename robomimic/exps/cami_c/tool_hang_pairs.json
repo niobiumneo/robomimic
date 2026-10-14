@@ -1,0 +1,7 @@
+{
+  "description": "Example for ToolHang: frame against stand, tool against frame. Verify names for your version.",
+  "groups": [
+    {"a": ["frame_*"], "b": ["stand_*"]},
+    {"a": ["tool_*"], "b": ["frame_*"]}
+  ]
+}

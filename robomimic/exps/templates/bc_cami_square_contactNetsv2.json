@@ -1,8 +1,8 @@
 {
     "algo_name": "bc_cami_contactNets",
     "experiment": {
-        "name": "cami_huber_square",
-        "validate": false,
+        "name": "square_cami_contactnets_lr_decay",
+        "validate": true,
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": true,
@@ -40,10 +40,10 @@
     "train": {
         "data": [
             {
-                "path": "dataset/square/ph/cami_with_force.hdf5"
+                "path": "dataset/square_image_84_contactnets.hdf5"
             }
         ],
-        "output_dir": "../trained_models",
+        "output_dir": "trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
@@ -51,14 +51,15 @@
         "hdf5_load_next_obs": false,
         "hdf5_normalize_obs": false,
         "hdf5_filter_key": "train",
-        "hdf5_validation_filter_key": null,
+        "hdf5_validation_filter_key": "valid",
         "seq_length": 11,
         "pad_seq_length": true,
         "frame_stack": 1,
         "pad_frame_stack": true,
         "dataset_keys": [
             "actions",
-            "obs/force"
+            "contact_state",
+            "contact_mask"
         ],
         "action_keys": [
             "actions"
@@ -80,10 +81,13 @@
             "policy": {
                 "optimizer_type": "adam",
                 "learning_rate": {
-                    "initial": 0.00001,
+                    "initial": 0.0001,
                     "decay_factor": 0.5,
-                    "epoch_schedule": [1000],
-                    "scheduler_type": "multistep"
+                    "epoch_schedule": [
+                        1000
+                    ],
+                    "scheduler_type": "multistep",
+                    "step_every_batch": false
                 },
                 "regularization": {
                     "L2": 0
@@ -93,9 +97,12 @@
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
-                    "decay_factor": 0.1,
-                    "epoch_schedule": [],
-                    "scheduler_type": "multistep"
+                    "decay_factor": 0.5,
+                    "epoch_schedule": [
+                        1000
+                    ],
+                    "scheduler_type": "multistep",
+                    "step_every_batch": false
                 },
                 "regularization": {
                     "L2": 0
@@ -105,9 +112,12 @@
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
-                    "decay_factor": 0.1,
-                    "epoch_schedule": [],
-                    "scheduler_type": "multistep"
+                    "decay_factor": 0.5,
+                    "epoch_schedule": [
+                        1000
+                    ],
+                    "scheduler_type": "multistep",
+                    "step_every_batch": false
                 },
                 "regularization": {
                     "L2": 0
@@ -117,9 +127,12 @@
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
-                    "decay_factor": 0.1,
-                    "epoch_schedule": [],
-                    "scheduler_type": "multistep"
+                    "decay_factor": 0.5,
+                    "epoch_schedule": [
+                        1000
+                    ],
+                    "scheduler_type": "multistep",
+                    "step_every_batch": false
                 },
                 "regularization": {
                     "L2": 0
@@ -247,13 +260,34 @@
             "force_obs_key": "force",
             "contact_label_key": "contact_label",
             "normalize_embeddings": true,
-            "continuous_contact": {
-                "enabled": true,
-                "force_dataset_key": "obs/force",
-                "force_scale": null,
-                "huber_delta": 0.1,
+            "state_loss_weight": 0.01,
+            "traj_loss_weight": 1.0,
+            "momentum": 0.995,
+            "continuous": {
+                "formulation_version": 7,
+                "feature_names": [
+                    "gap",
+                    "normal_impulse",
+                    "tangential_impulse_magnitude"
+                ],
+                "feature_weights": [
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "gap_scale": null,
+                "force_scale": 50.0,
+                "normal_impulse_scale": null,
+                "tangential_impulse_scale": null,
+                "binary_feature": "normal_impulse",
+                "binary_threshold": 0.0,
                 "contact_temperature": 0.05,
-                "gamma": 1
+                "gamma": 1.0,
+                "distance_penalty": "huber",
+                "huber_delta": 0.1,
+                "chunk_size": 64,
+                "objective": "weighted",
+                "privileged_obs_keys": []
             }
         }
     },

@@ -144,7 +144,10 @@ def load_data_for_training(config, obs_keys):
 
 
 def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None):
-    """Build datasets, including a force-validity mask for continuous CaMI."""
+    """Build datasets with validity masks for continuous contact supervision."""
+    if config.algo_name == "bc_cami_contactNets" and "continuous" in config.algo.cami:
+        from robomimic.utils.contactnets_dataset_utils import prepare_contactnets_datasets
+        prepare_contactnets_datasets(config)
     if dataset_path is None:
         dataset_path = config.train.data
 
@@ -169,10 +172,10 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         pad_seq_length=config.train.pad_seq_length,
         # Repeated boundary samples must not enter the force distance.
         # Other algorithms retain their existing loader behavior.
-        get_pad_mask=(
+        get_pad_mask=((config.algo_name == "bc_cami_contactNets" and "continuous" in config.algo.cami) or (
             config.algo_name in FORCE_CAMI_ALGOS
             and config.algo.cami.get("continuous_contact", {}).get("enabled", False)
-        ),
+        )),
         goal_mode=config.train.goal_mode,
         hdf5_cache_mode=config.train.hdf5_cache_mode,
         hdf5_use_swmr=config.train.hdf5_use_swmr,

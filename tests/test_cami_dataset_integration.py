@@ -21,7 +21,7 @@ from robomimic.utils import cami_dataset_utils as data_utils
 
 
 TEMPLATES = Path(__file__).resolve().parents[1] / "robomimic/exps/templates"
-FORCE_TEMPLATES = ("bc_cami.json", "bc_cami_square_contactNetsv2.json")
+FORCE_TEMPLATES = ("bc_cami.json", "bc_cami_square.json")
 
 
 @pytest.fixture
@@ -156,7 +156,6 @@ def test_force_cache_alignment_and_padding(dataset_path, cache_mode, template):
 @pytest.mark.parametrize("template, images", [
     ("bc_cami.json", False),
     ("bc_cami_square.json", True),
-    ("bc_cami_square_contactNetsv2.json", True),
     ("bc_cami_lcp_v1.json", True),
     ("bc_cami_lcp_v2.json", False),
     ("bc_cami_lcp_v2_marginal.json", False),
@@ -170,10 +169,6 @@ def test_hdf5_to_optimizer_step(dataset_path, template, images):
     shapes = file_utils.get_shape_metadata_from_dataset(
         config.train.data[0], config.train.action_keys, config.all_obs_keys)
     model = algo_factory(config.algo_name, config, shapes["all_shapes"], shapes["ac_dim"], torch.device("cpu"))
-    if config.algo_name == "bc_cami_contactNets":
-        from robomimic.algo.bc_cami_contactNets import BC_CaMI_ContactNets
-        assert type(model) is BC_CaMI_ContactNets
-        assert "continuous" not in config.algo.cami
     previous = next(model.nets["policy"].parameters()).detach().clone()
     logs = train_utils.run_epoch(model, DataLoader(dataset, batch_size=2), epoch=1, num_steps=1)
     assert np.isfinite(logs["Loss"])
@@ -188,20 +183,10 @@ def test_hdf5_to_optimizer_step(dataset_path, template, images):
         actions = model.nets["policy"](obs_dict=batch["obs"])
         feature_actions = model.nets["policy"].forward_with_features(obs=batch["obs"])[0]
     torch.testing.assert_close(actions, feature_actions)
-    if config.algo_name == "bc_cami_contactNets":
-        assert np.isfinite(logs["State_CaMI_Loss"])
-        assert np.isfinite(logs["Traj_CaMI_Loss"])
-        # Exercise the template's policy LR decay at the epoch boundary.
-        assert model.optimizers["policy"].param_groups[0]["lr"] == pytest.approx(1e-5)
-        for epoch in range(1, 1000):
-            model.on_epoch_end(epoch)
-        assert model.optimizers["policy"].param_groups[0]["lr"] == pytest.approx(1e-5)
-        model.on_epoch_end(1000)
-        assert model.optimizers["policy"].param_groups[0]["lr"] == pytest.approx(5e-6)
     dataset.close_and_delete_hdf5_handle()
 
 
-@pytest.mark.parametrize("algorithm", ["bc", "bc_cami", "bc_cami_contactNets"])
+@pytest.mark.parametrize("algorithm", ["bc", "bc_cami"])
 def test_rollouts_without_force_keep_success_metrics(dataset_path, capsys, algorithm):
     """Exercise real policies with a deterministic environment lacking force.
 
@@ -212,7 +197,7 @@ def test_rollouts_without_force_keep_success_metrics(dataset_path, capsys, algor
     from robomimic.algo import RolloutPolicy
     from robomimic.envs.env_base import EnvBase
 
-    template = FORCE_TEMPLATES[1] if algorithm == "bc_cami_contactNets" else FORCE_TEMPLATES[0]
+    template = FORCE_TEMPLATES[0]
     config = make_config(dataset_path, template)
     if algorithm == "bc":
         raw = config.to_dict()

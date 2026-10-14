@@ -29,7 +29,6 @@ import sys
 import socket
 import traceback
 from datetime import datetime
-import h5py
 
 from collections import OrderedDict
 
@@ -46,20 +45,6 @@ import robomimic.utils.lang_utils as LangUtils
 from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
-from robomimic.CAMI.force_modality import ForceModality
-from robomimic.CAMI.force_encoder import ForceEncoderCore
-
-def compute_force_stats(hdf5_path):
-    all_force = []
-    with h5py.File(hdf5_path, "r") as f:
-        demos = list(f["data"].keys())
-        for demo in demos:
-            force = f[f"data/{demo}/obs/force"][()]
-            all_force.append(force)
-    all_force = np.concatenate(all_force, axis=0)  # [N, D]
-    mean = all_force.mean(axis=0)
-    std = np.maximum(all_force.std(axis=0), 1e-6)
-    return mean, std
 
 
 def _print_epoch_summary(phase, epoch, total_epochs, metrics):
@@ -118,10 +103,6 @@ def train(config, device, resume=False, quiet=False):
     if isinstance(config.train.data, str):
         with config.values_unlocked():
             config.train.data = [{"path": config.train.data}]
-
-    # train_dataset_path = config.train.data[0]["path"]
-    # force_mean, force_std = compute_force_stats(train_dataset_path)
-    # ForceModality.set_normalization_stats(force_mean, force_std, clip=5.0)
 
     # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
     ObsUtils.initialize_obs_utils_with_config(config, verbose=not quiet)
@@ -544,13 +525,19 @@ def train(config, device, resume=False, quiet=False):
             print("\nsaved backup of latest model at {}\n".format(latest_model_backup_path))
 
         # Finally, log memory usage in MB
-        process = psutil.Process(os.getpid())
-        mem_usage = int(process.memory_info().rss / 1000000)
-        data_logger.record("System/RAM Usage (MB)", mem_usage, epoch)
+        # Restricted process namespaces can hide the current PID from psutil.
+        # Optional memory telemetry must not abort a completed training epoch.
+        try:
+            mem_usage = int(psutil.Process(os.getpid()).memory_info().rss / 1000000)
+        except (psutil.Error, OSError):
+            mem_usage = None
+        if mem_usage is not None:
+            data_logger.record("System/RAM Usage (MB)", mem_usage, epoch)
         data_logger.flush(epoch)
         if quiet:
-            print("Epoch {}/{} complete | checkpoint saved | RAM={} MB".format(
-                epoch, config.train.num_epochs, mem_usage), flush=True)
+            print("Epoch {}/{} complete | checkpoint saved | RAM={}".format(
+                epoch, config.train.num_epochs,
+                "{} MB".format(mem_usage) if mem_usage is not None else "unavailable"), flush=True)
         else:
             print("\nEpoch {} Memory Usage: {} MB\n".format(epoch, mem_usage))
 
@@ -584,28 +571,7 @@ def main(args):
     if getattr(args, "wandb_project", None) is not None:
         config.experiment.logging.wandb_proj_name = args.wandb_project
 
-    # # ------------------------------------------------------------------
-    # # Inject custom force modality / encoder BEFORE config.lock()
-    # # ------------------------------------------------------------------
-    # with config.values_unlocked():
-    #     # remove "force" from low_dim if it is there
-    #     if "force" in config.observation.modalities.obs.low_dim:
-    #         config.observation.modalities.obs.low_dim.remove("force")
-
-    #     # create a separate force modality branch
-    #     config.observation.modalities.obs.force = ["force"]
-    #     config.observation.modalities.goal.force = []
-
-    #     # create encoder config for force modality
-    #     config.observation.encoder.force.core_class = "ForceEncoderCore"
-    #     config.observation.encoder.force.core_kwargs = {
-    #         "feature_dimension": 64,
-    #     }
-    #     config.observation.encoder.force.obs_randomizer_class = None
-    #     config.observation.encoder.force.obs_randomizer_kwargs = {}
-
-
-        # Select the device for the model and training batches.
+    # Select the device for the model and training batches.
     device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
 
     # Report the selected device.

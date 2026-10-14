@@ -1,0 +1,4 @@
+{
+  "description": "Example for Square: nut against insertion peg. Verify names with inspect_cami_c_geoms for your environment version.",
+  "groups": [{"a": ["SquareNut_*"], "b": ["body:peg1"]}]
+}

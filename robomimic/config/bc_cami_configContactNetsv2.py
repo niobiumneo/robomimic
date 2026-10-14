@@ -1,94 +1,66 @@
-"""
-Configuration for BC-RNN with binary or continuous force-weighted CaMI.
-The experiment JSON supplies task-specific cameras and dataset paths.
-"""
+"""BC-RNN with the full gap / normal / tangential impulse CaMI descriptor."""
 
-from copy import deepcopy
-from robomimic.config.bc_config import BCConfig
+from robomimic.config.bc_cami_config import BCCaMIConfig
 
 
-class BCCaMIContactNetsConfig(BCConfig):
+class BCCaMIContactNetsConfig(BCCaMIConfig):
     ALGO_NAME = "bc_cami_contactNets"
+
+    def experiment_config(self):
+        super().experiment_config()
+        self.experiment.validate = True
+        self.experiment.rollout.rate = 50
+        self.experiment.rollout.n = 50
 
     def train_config(self):
         super().train_config()
-        self.train.hdf5_load_next_obs = False
-        # Default horizon is 10: one anchor plus ten future steps.
+        self.train.frame_stack = 1
         self.train.seq_length = 11
-
-    def observation_config(self):
-        super().observation_config()
-        self.observation.modalities.obs.rgb = [
-            "agentview_image", "robot0_eye_in_hand_image",
-        ]
-        self.observation.modalities.obs.low_dim = [
-            "robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos", "object",
-        ]
-        self.observation.modalities.goal.rgb = []
-        self.observation.modalities.goal.low_dim = []
-        # Force and contact labels are auxiliary data, not policy inputs.
+        self.train.dataset_keys = ["actions", "contact_state", "contact_mask"]
+        self.train.action_keys = ["actions"]
+        self.train.action_config = {"actions": {"normalization": None}}
+        self.train.hdf5_filter_key = "train"
+        self.train.hdf5_validation_filter_key = "valid"
+        self.train.num_epochs = 2000
+        self.train.max_grad_norm = 1.
 
     def algo_config(self):
         super().algo_config()
         self.algo.rnn.enabled = True
-        for name in ("state_encoder", "snippet_encoder", "key_proj"):
-            self.algo.optim_params[name] = deepcopy(self.algo.optim_params.policy)
-
-        self.algo.cami.enabled = True
-        # Original fallback: lambda_state=loss_weight, lambda_traj=1.0.
-        # Preserve explicit coefficients in any existing experiment JSON.
-        self.algo.cami.loss_weight = 0.01
-        self.algo.cami.temperature = 0.07
-        self.algo.cami.loss_type = "paired_infonce"
-        self.algo.cami.snippet_horizon = 10
-        self.algo.optim_params.policy.learning_rate.initial = 1e-4 
-        self.algo.optim_params.policy.learning_rate.decay_factor = 0.1
-        self.algo.optim_params.policy.learning_rate.epoch_schedule = [1000] # epochs where LR decay occurs
-        self.algo.optim_params.policy.learning_rate.scheduler_type = "multistep"
-
-        # Legacy fields retained for config compatibility. The in-batch
-        # loss uses all eligible negatives, not a num_negatives subsample.
-        self.algo.cami.num_negatives = 1
-        self.algo.cami.opposite_contact_negatives_only = True
-        self.algo.cami.contact_threshold = 10.0
-
-        # Match the current branch's experiment JSON: targets use EMA.
+        self.algo.rnn.open_loop = False
+        self.algo.rnn.kwargs.bidirectional = False
+        # Preserve the previous force-CaMI coefficient defaults explicitly.
+        self.algo.cami.state_loss_weight = .01
+        self.algo.cami.traj_loss_weight = 1.
         self.algo.cami.use_momentum_target = True
-        self.algo.cami.target_tau = 0.005
-
-        # Legacy fusion fields remain readable by existing configurations.
-        # The current anchor is policy latent -> state_encoder.
-        self.algo.cami.image_feature_dim = 128
-        self.algo.cami.force_feature_dim = 128
-        self.algo.cami.fused_feature_dim = 256
-        self.algo.cami.anchor_fusion_layers = (256, 256)
-
-        self.algo.cami.contrastive_dim = 128
-        self.algo.cami.policy_latent_dim = 1024
-        self.algo.cami.query_proj_layers = (128,)
-        self.algo.cami.key_proj_layers = (128,)
-        self.algo.cami.snippet_encoder_type = "lstm"
-        self.algo.cami.snippet_hidden_dim = 256
-        self.algo.cami.snippet_num_layers = 1
-        self.algo.cami.image_obs_key = [
-            "agentview_image", "robot0_eye_in_hand_image",
-        ]
-        self.algo.cami.force_obs_key = "force"
-        self.algo.cami.contact_label_key = "contact_label"
-        self.algo.cami.normalize_embeddings = True
-
-        # Binary behavior remains the default. The continuous experiment
-        # JSON explicitly enables the force-weighted loss.
+        # EMA: target <- momentum * target + (1 - momentum) * online.
+        self.algo.cami.momentum = .995
         self.algo.cami.continuous_contact.enabled = False
-        self.algo.cami.continuous_contact.force_dataset_key = "obs/force"
+        for name in ("policy", "state_encoder", "snippet_encoder", "key_proj"):
+            lr = self.algo.optim_params[name].learning_rate
+            lr.initial = 1e-4
+            lr.decay_factor = .5
+            lr.epoch_schedule = [1000]
+            lr.scheduler_type = "multistep"
+            lr.step_every_batch = False
 
-        # Null fits std(||F_xyz||) + 1e-6 from selected training demos only.
-        # A positive number explicitly preserves a previously fitted scale.
-        self.algo.cami.continuous_contact.force_scale = None
-
-        # Huber transition after force normalization.
-        self.algo.cami.continuous_contact.huber_delta = 0.1
-
-        # Weight W_ij = (1 - exp(-D_ij / contact_temperature)) ** gamma.
-        self.algo.cami.continuous_contact.contact_temperature = 0.05
-        self.algo.cami.continuous_contact.gamma = 1.0
+        c = self.algo.cami.continuous
+        c.formulation_version = 7
+        c.feature_names = ["gap", "normal_impulse", "tangential_impulse_magnitude"]
+        c.feature_weights = [1., 1., 1.]
+        # Null requests training-only scale fitting before model construction.
+        c.gap_scale = None
+        c.force_scale = 50.  # Unused by the physics descriptor.
+        c.normal_impulse_scale = None
+        c.tangential_impulse_scale = None
+        c.normalization_fit_demos = []
+        c.normalization_method = "selected_training_std"
+        c.binary_feature = "normal_impulse"
+        c.binary_threshold = 0.
+        c.contact_temperature = .05
+        c.gamma = 1.
+        c.distance_penalty = "huber"
+        c.huber_delta = .1
+        c.chunk_size = 64
+        c.objective = "weighted"
+        c.privileged_obs_keys = []

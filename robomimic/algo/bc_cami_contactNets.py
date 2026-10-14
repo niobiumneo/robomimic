@@ -1,8 +1,8 @@
-"""ContactNets experiment entry point and the separate version-7 CaMI-C model.
+"""BC-RNN with privileged, full ContactNets-inspired contact supervision.
 
-The ContactNets force template uses cami.continuous_contact and obs/force,
-which the shared BC_CaMI implementation consumes. The version-7 model below
-uses cami.continuous with precomputed contact_state/contact_mask instead.
+The descriptor is [signed gap (m), normal impulse (N*s), tangential impulse
+magnitude (N*s)]. It sets detached Huber-based negative weights only; the
+policy receives cameras and ordinary robot/object observations.
 """
 
 from collections import OrderedDict
@@ -24,28 +24,28 @@ from robomimic.CAMI.continuous_contact import (
 import robomimic.utils.tensor_utils as TensorUtils
 
 
-@register_algo_factory_func("bc_cami_contactNets")
-def contactnets_config_to_class(algo_config):
-    return BC_CaMI_ContactNets, {}
-
-
-class BC_CaMI_ContactNets(BC_CaMI):
-    """Use the force-weighted CaMI path configured by the ContactNets template."""
-
-
 @register_algo_factory_func("bc_cami_c")
+@register_algo_factory_func("bc_cami_contactNets")
 def algo_config_to_class(algo_config):
-    return BC_CaMI_C, {}
+    # Older saved ContactNets checkpoints used the force-only config. Loading
+    # that complete saved config must retain its original architecture.
+    if "continuous" not in algo_config.cami:
+        return BC_CaMI, {}
+    return BC_CaMI_ContactNets, {}
 
 
 def _privileged_key(name):
     return name.startswith("contact_") or "force" in name.lower() or "torque" in name.lower() or "impulse" in name.lower()
 
 
-class BC_CaMI_C(BC_CaMI):
+class BC_CaMI_ContactNets(BC_CaMI):
     def _create_networks(self):
         cfg = self.algo_config
         c = cfg.cami.continuous
+        if list(c.feature_names) != ["gap", "normal_impulse", "tangential_impulse_magnitude"]:
+            raise ValueError("ContactNets requires the full gap/normal/tangential impulse descriptor")
+        if not math.isfinite(cfg.cami.temperature) or cfg.cami.temperature <= 0:
+            raise ValueError("CaMI temperature must be finite and positive")
         if c.get("formulation_version", None) != 7:
             raise ValueError("Generate a version 7 CaMI-C config before training")
         if c.distance_penalty not in ("l1", "huber"):
@@ -59,8 +59,8 @@ class BC_CaMI_C(BC_CaMI):
         for value in (cfg.cami.state_loss_weight, cfg.cami.traj_loss_weight):
             if not math.isfinite(value) or value < 0:
                 raise ValueError("CaMI loss weights must be finite and nonnegative")
-        if cfg.cami.snippet_horizon < 1:
-            raise ValueError("snippet_horizon must be positive")
+        if not isinstance(cfg.cami.snippet_horizon, int) or cfg.cami.snippet_horizon < 1:
+            raise ValueError("snippet_horizon must be a positive integer")
         if not math.isfinite(c.binary_threshold) or c.binary_threshold < 0:
             raise ValueError("binary_threshold must be finite and nonnegative")
         if not cfg.rnn.enabled or cfg.rnn.open_loop or cfg.rnn.kwargs.get("bidirectional", False):
@@ -105,7 +105,7 @@ class BC_CaMI_C(BC_CaMI):
         result["obs"] = {k: batch["obs"][k] for k in self.obs_shapes}
         for key in ("contact_state", "contact_mask"):
             if key not in batch:
-                raise KeyError("Missing {}. Run prepare_cami_c_dataset and add both contact keys to dataset_keys".format(key))
+                raise KeyError("Missing {}. Run prepare_cami_c_dataset --mode physics and add both contact keys to dataset_keys".format(key))
             value = batch[key]
             if value.ndim != 4 or value.shape[:2] != actions.shape[:2] or value.shape[2:] != (H, Fdim):
                 raise ValueError("{} must be [B,T,{},{}], got {}".format(key, H, Fdim, tuple(value.shape)))
@@ -131,12 +131,9 @@ class BC_CaMI_C(BC_CaMI):
         return TensorUtils.to_float(TensorUtils.to_device(result, self.device))
 
     def _forward_policy_with_latent(self, obs_dict, goal_dict=None):
-        if goal_dict is not None:
-            length = next(iter(obs_dict.values())).shape[1]
-            goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=length, dim=1)
-        raw, feats = self.nets["policy"].forward_with_features(obs=obs_dict, goal=goal_dict)
-        # The inherited feature API returns raw decoder values. Match rollout.
-        return torch.tanh(raw["action"]), feats
+        # RNNActorNetwork returns an already-squashed tensor and also expands
+        # goal observations in time. Do neither a second time here.
+        return self.nets["policy"].forward_with_features(obs=obs_dict, goal=goal_dict)
 
     def _snippet_embedding(self, actions, lengths, target=False):
         suffix = "_target" if target else ""
@@ -174,7 +171,7 @@ class BC_CaMI_C(BC_CaMI):
             mask = batch["contact_mask"].bool()
             normalized = normalize_contact(contact, c.feature_names, c.gap_scale, c.force_scale, c.normal_impulse_scale, c.tangential_impulse_scale)
             # Privileged physics labels only set detached negative weights.
-            # L1 is the default rho; neither labels nor impulses enter the policy.
+            # Neither labels nor impulses enter the policy.
             distance, pair_valid = contact_distance(normalized, mask, c.feature_weights,
                 c.huber_delta, c.chunk_size, penalty=c.distance_penalty)
             # No valid future actions -> neither anchor nor negative candidate.
@@ -230,9 +227,17 @@ class BC_CaMI_C(BC_CaMI):
 
     def log_info(self, info):
         log = BC_RNN.log_info(self, info)
+        for label, name in (("BC_Action_Loss", "bc_action_loss"),
+                            ("State_CaMI_Loss", "state_cami_loss"),
+                            ("Traj_CaMI_Loss", "traj_cami_loss")):
+            log[label] = info["losses"][name].item()
         for name, value in info["losses"].items():
             log["CaMI_C/" + name] = value.item()
         for name, value in info.items():
             if name.endswith("_grad_norm"):
                 log["CaMI_C/" + name] = value
         return log
+
+
+# Preserve the archived class name for imports without a second registration.
+BC_CaMI_C = BC_CaMI_ContactNets

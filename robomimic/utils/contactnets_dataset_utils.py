@@ -16,7 +16,7 @@ from robomimic.utils.cami_dataset_utils import (
 SCALE_KEYS = ("gap_scale", "normal_impulse_scale", "tangential_impulse_scale")
 
 
-def prepare_contactnets_datasets(config):
+def prepare_contactnets_datasets(config, *, require_rnn=True):
     """Check the exact feature order, future offsets, masks and SI units.
 
     A null scale fits std + 1e-6 on the selected training demonstrations. Use
@@ -31,8 +31,8 @@ def prepare_contactnets_datasets(config):
         raise ValueError("ContactNets requires formulation 7 and [gap, normal_impulse, tangential_impulse_magnitude]")
     if not isinstance(horizon, int) or horizon < 1 or train.seq_length < horizon + 1 or train.frame_stack != 1:
         raise ValueError("ContactNets requires frame_stack=1 and seq_length>=snippet_horizon+1")
-    if (not config.algo.rnn.enabled or config.algo.rnn.open_loop
-            or config.algo.rnn.kwargs.get("bidirectional", False)):
+    if require_rnn and (not config.algo.rnn.enabled or config.algo.rnn.open_loop
+                        or config.algo.rnn.kwargs.get("bidirectional", False)):
         raise ValueError("ContactNets requires a causal, closed-loop BC-RNN")
     if config.algo.cami.continuous_contact.enabled:
         raise ValueError("Remove the force-only continuous_contact.enabled setting; ContactNets uses cami.continuous")

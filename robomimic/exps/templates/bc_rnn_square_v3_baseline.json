@@ -1,0 +1,338 @@
+{
+    "algo_name": "bc_cami_v3",
+    "experiment": {
+        "name": "square_bc_rnn_v3_baseline",
+        "validate": true,
+        "logging": {
+            "terminal_output_to_txt": true,
+            "log_tb": true,
+            "log_wandb": false,
+            "wandb_proj_name": "cami"
+        },
+        "save": {
+            "enabled": true,
+            "every_n_seconds": null,
+            "every_n_epochs": 50,
+            "epochs": [],
+            "on_best_validation": false,
+            "on_best_rollout_return": false,
+            "on_best_rollout_success_rate": true
+        },
+        "epoch_every_n_steps": 500,
+        "validation_epoch_every_n_steps": 10,
+        "env": null,
+        "additional_envs": null,
+        "render": false,
+        "render_video": false,
+        "keep_all_videos": false,
+        "video_skip": 5,
+        "rollout": {
+            "enabled": true,
+            "n": 50,
+            "horizon": 400,
+            "rate": 50,
+            "warmstart": 0,
+            "terminate_on_success": true
+        },
+        "env_meta_update_dict": {},
+        "ckpt_path": null
+    },
+    "train": {
+        "data": [
+            {
+                "path": "dataset/square_image_84_contactnets_state.hdf5"
+            }
+        ],
+        "output_dir": "trained_models",
+        "normalize_weights_by_ds_size": false,
+        "num_data_workers": 0,
+        "hdf5_cache_mode": "low_dim",
+        "hdf5_use_swmr": true,
+        "hdf5_load_next_obs": false,
+        "hdf5_normalize_obs": false,
+        "hdf5_filter_key": "train",
+        "hdf5_validation_filter_key": "valid",
+        "seq_length": 16,
+        "pad_seq_length": true,
+        "frame_stack": 1,
+        "pad_frame_stack": true,
+        "dataset_keys": [
+            "actions"
+        ],
+        "action_keys": [
+            "actions"
+        ],
+        "action_config": {
+            "actions": {
+                "normalization": null
+            }
+        },
+        "goal_mode": null,
+        "cuda": true,
+        "batch_size": 32,
+        "num_epochs": 2000,
+        "seed": 0,
+        "max_grad_norm": 1
+    },
+    "algo": {
+        "optim_params": {
+            "policy": {
+                "optimizer_type": "adam",
+                "learning_rate": {
+                    "initial": 0.0001,
+                    "decay_factor": 0.5,
+                    "epoch_schedule": [
+                        1000
+                    ],
+                    "scheduler_type": "multistep",
+                    "step_every_batch": false
+                },
+                "regularization": {
+                    "L2": 0
+                }
+            },
+            "cami": {
+                "optimizer_type": "adam",
+                "learning_rate": {
+                    "initial": 0.0001,
+                    "decay_factor": 0.5,
+                    "epoch_schedule": [
+                        1000
+                    ],
+                    "scheduler_type": "multistep",
+                    "step_every_batch": false
+                },
+                "regularization": {
+                    "L2": 0
+                }
+            }
+        },
+        "loss": {
+            "l2_weight": 1,
+            "l1_weight": 0,
+            "cos_weight": 0
+        },
+        "actor_layer_dims": [
+            1024,
+            1024
+        ],
+        "gaussian": {
+            "enabled": false,
+            "fixed_std": false,
+            "init_std": 0.1,
+            "min_std": 0.01,
+            "std_activation": "softplus",
+            "low_noise_eval": true
+        },
+        "gmm": {
+            "enabled": false,
+            "num_modes": 5,
+            "min_std": 0.0001,
+            "std_activation": "softplus",
+            "low_noise_eval": true
+        },
+        "vae": {
+            "enabled": false,
+            "latent_dim": 14,
+            "latent_clip": null,
+            "kl_weight": 1,
+            "decoder": {
+                "is_conditioned": true,
+                "reconstruction_sum_across_elements": false
+            },
+            "prior": {
+                "learn": false,
+                "is_conditioned": false,
+                "use_gmm": false,
+                "gmm_num_modes": 10,
+                "gmm_learn_weights": false,
+                "use_categorical": false,
+                "categorical_dim": 10,
+                "categorical_gumbel_softmax_hard": false,
+                "categorical_init_temp": 1,
+                "categorical_temp_anneal_step": 0.001,
+                "categorical_min_temp": 0.3
+            },
+            "encoder_layer_dims": [
+                300,
+                400
+            ],
+            "decoder_layer_dims": [
+                300,
+                400
+            ],
+            "prior_layer_dims": [
+                300,
+                400
+            ]
+        },
+        "rnn": {
+            "enabled": true,
+            "horizon": 10,
+            "hidden_dim": 400,
+            "rnn_type": "LSTM",
+            "num_layers": 2,
+            "open_loop": false,
+            "kwargs": {
+                "bidirectional": false
+            }
+        },
+        "transformer": {
+            "enabled": false,
+            "context_length": 10,
+            "embed_dim": 512,
+            "num_layers": 6,
+            "num_heads": 8,
+            "emb_dropout": 0.1,
+            "attn_dropout": 0.1,
+            "block_output_dropout": 0.1,
+            "sinusoidal_embedding": false,
+            "activation": "gelu",
+            "supervise_all_steps": false,
+            "nn_parameter_for_timesteps": true,
+            "pred_future_acs": false
+        },
+        "cami": {
+            "enabled": false,
+            "loss_weight": 0.01,
+            "temperature": 0.07,
+            "contact_threshold": 10,
+            "loss_type": "paired_infonce",
+            "snippet_horizon": 10,
+            "num_negatives": 1,
+            "opposite_contact_negatives_only": true,
+            "use_momentum_target": true,
+            "target_tau": 0.005,
+            "image_feature_dim": 128,
+            "force_feature_dim": 128,
+            "fused_feature_dim": 256,
+            "contrastive_dim": 128,
+            "policy_latent_dim": 1024,
+            "anchor_fusion_layers": [
+                256,
+                256
+            ],
+            "query_proj_layers": [
+                128
+            ],
+            "key_proj_layers": [
+                128
+            ],
+            "snippet_encoder_type": "lstm",
+            "snippet_hidden_dim": 256,
+            "snippet_num_layers": 1,
+            "image_obs_key": [
+                "agentview_image",
+                "robot0_eye_in_hand_image"
+            ],
+            "force_obs_key": "force",
+            "contact_label_key": "contact_label",
+            "normalize_embeddings": true,
+            "state_loss_weight": 0.01,
+            "traj_loss_weight": 1.0,
+            "momentum": 0.995,
+            "continuous": {
+                "formulation_version": 7,
+                "feature_names": [
+                    "gap",
+                    "normal_impulse",
+                    "tangential_impulse_magnitude"
+                ],
+                "feature_weights": [
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "gap_scale": null,
+                "force_scale": 50.0,
+                "normal_impulse_scale": null,
+                "tangential_impulse_scale": null,
+                "binary_feature": "normal_impulse",
+                "binary_threshold": 0.0,
+                "contact_temperature": 0.05,
+                "gamma": 1.0,
+                "distance_penalty": "huber",
+                "huber_delta": 0.1,
+                "chunk_size": 64,
+                "objective": "weighted",
+                "privileged_obs_keys": []
+            },
+            "v3": {
+                "context_steps": 5,
+                "warmup_epochs": 100,
+                "gradient_diagnostics_every": 100,
+                "prediction": {
+                    "enabled": false,
+                    "features": [
+                        "gap"
+                    ],
+                    "hidden_dims": [
+                        128
+                    ],
+                    "loss_weight": 0.01,
+                    "huber_delta": 0.1
+                }
+            }
+        }
+    },
+    "observation": {
+        "modalities": {
+            "obs": {
+                "low_dim": [
+                    "robot0_eef_pos",
+                    "robot0_eef_quat",
+                    "robot0_gripper_qpos",
+                    "object"
+                ],
+                "rgb": [
+                    "agentview_image",
+                    "robot0_eye_in_hand_image"
+                ],
+                "depth": [],
+                "scan": []
+            },
+            "goal": {
+                "low_dim": [],
+                "rgb": [],
+                "depth": [],
+                "scan": []
+            }
+        },
+        "encoder": {
+            "low_dim": {
+                "core_class": null,
+                "core_kwargs": {},
+                "obs_randomizer_class": null,
+                "obs_randomizer_kwargs": {}
+            },
+            "rgb": {
+                "core_class": "VisualCore",
+                "core_kwargs": {},
+                "obs_randomizer_class": "CropRandomizer",
+                "obs_randomizer_kwargs": {
+                    "crop_height": 76,
+                    "crop_width": 76,
+                    "num_crops": 1,
+                    "pos_enc": false
+                }
+            },
+            "depth": {
+                "core_class": "VisualCore",
+                "core_kwargs": {},
+                "obs_randomizer_class": null,
+                "obs_randomizer_kwargs": {}
+            },
+            "scan": {
+                "core_class": "ScanCore",
+                "core_kwargs": {},
+                "obs_randomizer_class": null,
+                "obs_randomizer_kwargs": {}
+            }
+        }
+    },
+    "meta": {
+        "hp_base_config_file": null,
+        "hp_keys": [],
+        "hp_values": []
+    }
+}

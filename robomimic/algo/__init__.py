@@ -14,3 +14,4 @@ from robomimic.algo.bc_cami import BC_CaMI
 from robomimic.algo.bc_cami_contactNets import BC_CaMI_ContactNets
 from robomimic.algo.bc_cami_lcp_v1 import BC_CaMI_LCP
 from robomimic.algo.bc_cami_lcp_v2 import BC_CaMI_CaNCE
+from robomimic.algo.bc_cami_v3 import BCRNNCaMIV3, BCMLPCaMIV3

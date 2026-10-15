@@ -15,3 +15,4 @@ from robomimic.config.bc_cami_config import BCCaMIConfig
 from robomimic.config.bc_cami_configContactNetsv2 import BCCaMIContactNetsConfig
 from robomimic.config.bc_cami_lcp_v1_config import BCCaMILCPConfig
 from robomimic.config.bc_cami_lcp_v2_config import BCCaMICaNCEConfig
+from robomimic.config.bc_cami_v3_config import BCCaMIV3Config

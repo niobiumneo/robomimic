@@ -85,6 +85,9 @@ def prepare_cami_datasets(config):
     fitted only on the selected training demonstrations. Explicit positive
     scales are preserved. The resolved value is saved in the run configuration.
     """
+    if config.algo_name == "bc_cami_v3":
+        from robomimic.utils.cami_v3_dataset_utils import prepare_cami_v3_datasets
+        return prepare_cami_v3_datasets(config)
     if config.algo_name == "bc_cami_contactNets" and "continuous" in config.algo.cami:
         from robomimic.utils.contactnets_dataset_utils import prepare_contactnets_datasets
         return prepare_contactnets_datasets(config)

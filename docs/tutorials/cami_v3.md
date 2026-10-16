@@ -62,6 +62,17 @@ launcher delegates to the existing trainer and also accepts `--config`,
 `--debug`, and `--resume`. Debug mode performs two short training epochs and,
 if enabled, short rollouts; it is not a performance evaluation.
 
+`train_trials` takes the same options plus `--variant`, and evaluates the best
+checkpoint over repeated trials after training; see `cami_trials.md`:
+
+```bash
+python -m robomimic.scripts.train_trials \
+  --variant faithful \
+  --dataset dataset/square_image_84_contactnets_state.hdf5 \
+  --name square_cami_v3_faithful --n-trials 10 \
+  --wandb-project cami-square-v3 --quiet
+```
+
 ## Separate variants
 
 | `--variant` | Batch | Sequence | Context before anchor | Warmup | Prediction |
@@ -75,6 +86,8 @@ if enabled, short rollouts; it is not a performance evaluation.
 | `prediction` | 32 | 16 | 5 | 100 | Future signed gap |
 | `prediction_full` | 32 | 16 | 5 | 100 | Future gap and both impulses |
 | `baseline` | 32 | 16 | N/A | N/A | No CaMI modules |
+| `faithful` | 16 | 11 | 0 | 0 | Off, and see below |
+| `baseline_faithful` | 16 | 11 | N/A | N/A | No CaMI modules |
 
 `reference` is a v3 control with the old batch size, anchor time and loss weights.
 It is not claimed to reproduce v2 exactly: v3 groups the auxiliary parameters
@@ -86,6 +99,66 @@ observations and BC objective as its matching v3 setting. It excludes padded
 steps from BC loss, constructs no CaMI network or auxiliary optimizer, and
 requires no contact labels. `baseline` matches the batch and sequence settings
 of `history`, `warmup` and `prediction`; `baseline_reference` matches `reference`.
+
+### `faithful` and `baseline_faithful`
+
+`faithful` follows the October 2026 formulation report wherever the report fixes
+a value, and uses its most direct reading elsewhere. `reference` already uses
+every number the report gives (state weight 0.01, trajectory weight 1, EMA
+momentum 0.995, ten future actions, Huber delta 0.1, contact temperature 0.05,
+gamma 1, MSE-only BC, a 1024-d policy feature, a 1024-128-128 state projector, a
+one-layer action LSTM of 256 and a 256-128-128 trajectory head), and `faithful`
+sets them explicitly. It differs from `reference` in four things:
+
+- the descriptor channels are averaged (weights 1/3, summing to 1) rather than
+  summed, so that a pair differing by x in every channel gets the report's weight
+  curve (0.0247, 0.5934 and 0.9798 for 0.05, 0.5 and 2.0) and not the weight of
+  three times that distance;
+- the rollout hidden state is reset every `rnn.horizon` = 11 steps, which is also
+  the training sequence length (`reference` trains on 11 and resets every 10);
+- the learning rate is constant (no halving at epoch 1000);
+- every demonstration is used, with no validation split, so that the run is an
+  ordinary BC-RNN run apart from the CaMI terms.
+
+Like `reference`, it anchors at the first policy feature, keeps the state weight
+constant from epoch one, trains no prediction head, and uses batch size 16 and
+seed 0.
+
+`baseline_faithful` is its twin without CaMI. The two configs differ only in
+`algo.cami.enabled` and `train.dataset_keys`, and a test keeps it that way. To
+compare with an earlier `train.py` baseline, check that its checkpoint differs
+from `baseline_faithful` in nothing you care about:
+
+```bash
+python -m robomimic.scripts.compare_checkpoint_configs \
+  your_train_py_baseline.pth baseline_faithful.pth --trust-checkpoints
+```
+
+## Differences from the formulation report
+
+What the v3 code does that the report (October 2026, "Continuous force-weighted
+CaMI") does not say, per setting. `faithful` removes the rows marked *removed*;
+the others are intended extensions or open points.
+
+| Topic | Report | v3 |
+|---|---|---|
+| Descriptor | Scalar force magnitude `‖F_xyz‖ / sigma_F`, torque and direction excluded | Three simulator-reconstructed channels per offset: signed gap (m, capped at `--max-gap`, 2 cm by default), normal impulse and tangential impulse magnitude (N s). The impulses are state-conditioned simulator estimates, not recorded forces. Each channel is divided by its training standard deviation, as in the report |
+| Distance | Mean over common valid offsets of the Huber penalty of one scalar difference | Same, summed over channels with `feature_weights`. Unit weights triple the distance; `faithful` uses 1/3 each |
+| Weights | `W = (1 - exp(-D / tau_c))^gamma`, fixed, zero on the diagonal and without common offsets | Same, with the same defaults (`tau_c` 0.05, gamma 1, delta 0.1) |
+| Loss | Full-batch mean of `-log(exp(S_ii) / (exp(S_ii) + sum W exp(S)))` for the state and trajectory branches against one shared EMA key | Same. The log-sum-exp form handles rows without negatives |
+| Targets | EMA of the LSTM and head after the optimizer step, none for the state projector, untouched in validation | Same |
+| Gradients | The policy receives BC and state-loss gradients | Same for `reference`, `faithful` and the warmup variants; the prediction variants also send the prediction loss into the policy features |
+| Anchor | The first policy feature | `reference`, `batch32`, `batch64`, `faithful`: the first feature. `history`, `warmup`, `prediction*`: the feature after five steps of context. The report leaves open how longer history enters the anchor (section 8) |
+| State-loss weight | Constant 0.01 | `warmup`, `prediction*`: ramps from 0 to 0.01 over the first 100 epochs *(removed in `faithful`)* |
+| Prediction head | None (it names a prediction head as a separate probe, section 9) | `prediction*` add a head (weight 0.01 times the ramp) whose input is the policy feature and a detached action embedding *(removed in `faithful`)* |
+| Padding | Left to be specified | BC loss ignores padded steps. Snippets are packed to their real length, and anchors with no future action have zero CaMI loss |
+| Rollout hidden state | Not specified | Reset every `rnn.horizon` steps. Variants train on 11 or 16 steps but reset every 10 *(aligned in `faithful`)* |
+| Learning rate, validation | Not specified | `reference` and the other variants halve the rate at epoch 1000 and train on the `train` split, validating on `valid`; the `faithful` pair does neither |
+| Policy | BC-RNN with one latent per sample | Deterministic BC-RNN (no GMM); the feature is the last actor layer |
+
+For the report's own descriptor (force magnitude from `obs/force`), use the
+existing force-based `bc_cami` path (`bc_cami_square.json`); it follows every
+clause the report fixes.
 
 The larger batches are real joint contrastive batches. Gradient accumulation
 alone does not expand their negatives. Batch size 32 is the starting point;
@@ -164,6 +237,49 @@ This release includes deterministic BC-RNN and BC-MLP adapters. Set
 does not gain temporal memory from the adapter. Diffusion, Transformer, GMM and
 other learners still need their own feature adapters; they are not silently
 mapped onto BC-RNN. The internal LSTM encodes training action snippets only.
+
+## Check the labels before training
+
+The state loss can only separate anchors that the descriptors separate. Look at
+what the prepared labels give the weights, on any machine and without training:
+
+```bash
+python -m robomimic.scripts.inspect_cami_v3_dataset \
+  --dataset dataset/square_image_84_contactnets_state.hdf5 \
+  --variant prediction
+```
+
+It draws anchors the way the loader does (every training timestep starts a
+sequence and the anchor sits `context_steps` in, so `reference` and
+`prediction` give different pools), then reports:
+
+- the reconstruction provenance and any transitions above the replay tolerance;
+- per-channel statistics on training demos: valid fraction, fitted scale, the
+  share of gaps sitting at the 2 cm cap or penetrating, the share of exactly
+  zero impulses, and the 90th/99th percentiles in scale units;
+- the share of anchor windows that are `free` (every gap at the cap, no impulse),
+  `near` (anything between) and `contact` (a normal impulse above the binary
+  threshold), and the offset between each gap-closing and its impulse onset;
+- for random batches of the configured size, the fraction of pairs with
+  `W < 0.01` and `W > 0.99`, the mean `sum_j W_ij`, the share of anchors with
+  any negative, and `init loss = mean_i log(1 + sum_j W_ij)`, the state loss an
+  embedding with equal logits would score;
+- a table of which window classes contribute the negative weight, and the same
+  statistics under per-channel weights divided by their sum (identical to a
+  contact temperature multiplied by that sum), gap only and impulses only.
+
+Free-versus-free pairs have `W = 0` exactly, so `weight/near_zero_fraction` in
+the W&B metrics is close to the square of the free share printed here. A state
+loss that starts near `init loss` and falls far below it shows that the state
+projector can tell an anchor's own future action key from the negatives with
+nonzero weight. It does not show that the policy improves. The mass table says
+what those negatives are: if almost all of it is contact-versus-free, the loss
+mainly asks whether contact is coming, not how hard it will be.
+
+To compare a v3 variant with another run, diff the saved `config.json` of both
+runs. Compare v3 variants with the v3 `baseline` or `baseline_reference`, which
+share their batch size, sequence length, seed, learning-rate schedule and
+validation split. Runs from `train.py` with another config also differ in those.
 
 ## Diagnostics and customization
 

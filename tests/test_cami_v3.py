@@ -54,10 +54,11 @@ def data_path(tmp_path):
     return prepared
 
 
-def config_for(path, *, prediction=False, enabled=True, recurrent=True, images=False):
+def config_for(path, *, prediction=False, enabled=True, recurrent=True, images=False,
+               template="bc_cami_square_contactNetsv3.json"):
     cfg = config_factory("bc_cami_v3")
     with cfg.values_unlocked():
-        cfg.update(make_configs()["bc_cami_square_contactNetsv3.json"])
+        cfg.update(make_configs()[template])
         cfg.train.data = [{"path": str(path)}]
         cfg.train.cuda = False
         cfg.train.batch_size = 3
@@ -110,7 +111,7 @@ def test_separate_configs_and_no_replacement(tmp_path):
         if "baseline" in name:
             assert not config.algo.cami.enabled
     files = write_configs(tmp_path)
-    assert len(files) == 9
+    assert len(files) == 11
     before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
     with pytest.raises(FileExistsError):
         write_configs(tmp_path)
@@ -196,6 +197,88 @@ def test_anchor_uses_context_and_matching_future(data_path, monkeypatch):
         value[:, 6:] += 100
     later_features = model._policy_training_outputs(changed, batch["goal_obs"])[1]
     torch.testing.assert_close(later_features[:, 5], expected_features[:, 5])
+    close_datasets(training, validation)
+
+
+def flatten(value, prefix=""):
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            out.update(flatten(item, prefix + "." + key if prefix else key))
+        return out
+    return {prefix: value}
+
+
+def resolved(name):
+    cfg = config_factory("bc_cami_v3")
+    with cfg.values_unlocked():
+        cfg.update(make_configs()[name])
+    return json.loads(cfg.dump())
+
+
+def test_faithful_pair_uses_the_reports_values_and_differs_only_in_the_method():
+    on, off = flatten(resolved("bc_cami_square_contactNetsv3_faithful.json")), flatten(resolved("bc_rnn_square_v3_baseline_faithful.json"))
+    differing = {key for key in set(on) | set(off) if on.get(key) != off.get(key)}
+    assert differing == {"algo.cami.enabled", "train.dataset_keys", "experiment.name"}
+    assert on["algo.cami.enabled"] and not off["algo.cami.enabled"]
+    expected = {
+        "algo.cami.state_loss_weight": .01, "algo.cami.traj_loss_weight": 1., "algo.cami.momentum": .995,
+        "algo.cami.snippet_horizon": 10, "algo.cami.continuous.huber_delta": .1,
+        "algo.cami.continuous.contact_temperature": .05, "algo.cami.continuous.gamma": 1.,
+        "algo.cami.continuous.distance_penalty": "huber", "algo.cami.contrastive_dim": 128,
+        "algo.cami.query_proj_layers": [128], "algo.cami.key_proj_layers": [128],
+        "algo.cami.snippet_hidden_dim": 256, "algo.cami.snippet_num_layers": 1, "algo.actor_layer_dims": [1024, 1024],
+        "algo.loss.l2_weight": 1, "algo.loss.l1_weight": 0, "algo.loss.cos_weight": 0,
+        # the anchor is the first feature, the weight is never ramped and no head is trained
+        "algo.cami.v3.context_steps": 0, "algo.cami.v3.warmup_epochs": 0, "algo.cami.v3.prediction.enabled": False,
+        # one anchor and its ten future actions, which is also the period of the rollout hidden-state reset
+        "train.seq_length": 11, "algo.rnn.horizon": 11,
+        # an ordinary BC-RNN run: all demonstrations, no split, constant learning rate
+        "train.hdf5_filter_key": None, "train.hdf5_validation_filter_key": None, "experiment.validate": False,
+        "algo.optim_params.policy.learning_rate.epoch_schedule": [], "algo.optim_params.cami.learning_rate.epoch_schedule": [],
+        "train.batch_size": 16, "train.seed": 0, "train.max_grad_norm": 1}
+    for key, value in expected.items():
+        assert on[key] == value, key
+        assert off[key] == value, key
+    assert sum(on["algo.cami.continuous.feature_weights"]) == pytest.approx(1.)
+
+
+@pytest.mark.parametrize("difference, weight", [(.05, .0247), (.5, .5934), (2., .9798)])
+def test_faithful_weights_reproduce_the_reports_curve_with_every_channel_differing(difference, weight):
+    from robomimic.CAMI.continuous_contact import contact_distance, negative_weights
+    c = resolved("bc_cami_square_contactNetsv3_faithful.json")["algo"]["cami"]["continuous"]
+    normalized = torch.zeros(2, 1, 3)
+    normalized[1] = difference  # the same normalized difference in the gap, normal and tangential channels
+    distance, valid = contact_distance(normalized, torch.ones(2, 1, 3), c["feature_weights"], c["huber_delta"], 64,
+                                       penalty=c["distance_penalty"])
+    w = negative_weights(distance, valid, c["contact_temperature"], c["gamma"])
+    assert w[0, 1].item() == pytest.approx(weight, abs=5e-5)
+    # The three-channel sum with unit weights, as in the other variants, gives a larger weight.
+    summed = negative_weights(*contact_distance(normalized, torch.ones(2, 1, 3), [1., 1., 1.], .1, 64, penalty="huber"), .05, 1.)
+    assert summed[0, 1].item() > weight
+
+
+def test_faithful_variant_anchors_at_the_first_feature_with_the_full_state_weight_from_epoch_one(data_path, monkeypatch):
+    cfg = config_for(data_path, template="bc_cami_square_contactNetsv3_faithful.json")
+    assert cfg.train.seq_length == 11 and cfg.algo.rnn.horizon == 11
+    model, batch, training, validation, _ = setup_model(cfg)
+    captured = {}
+    real_forward = model.nets["cami"].forward
+    def capture(features, actions, lengths, contact, mask):
+        captured.update(features=features, actions=actions, contact=contact)
+        return real_forward(features, actions, lengths, contact, mask)
+    monkeypatch.setattr(model.nets["cami"], "forward", capture)
+    with torch.no_grad():  # before the optimizer step changes the weights
+        _, features = model._policy_training_outputs(batch["obs"], batch["goal_obs"])
+    info = model.train_on_batch(batch, epoch=1)
+    logs = model.log_info(info)
+    assert logs["CaMI_V3/state_weight"] == pytest.approx(.01) and logs["CaMI_V3/warmup_factor"] == 1.
+    assert logs["CaMI_V3/gradient/State_Policy_Norm"] > 0 and logs["Prediction_CaMI_Loss"] == 0
+    assert "CaMI_V3/gradient/Prediction_Policy_Norm" not in logs
+    torch.testing.assert_close(captured["features"], features[:, 0])
+    torch.testing.assert_close(captured["actions"], batch["actions"][:, 1:11])
+    torch.testing.assert_close(captured["contact"], batch["contact_state"][:, 0])
+    assert validation is None
     close_datasets(training, validation)
 
 

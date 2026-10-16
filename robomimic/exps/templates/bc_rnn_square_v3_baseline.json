@@ -80,9 +80,9 @@
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
-                    "decay_factor": 0.5,
+                    
                     "epoch_schedule": [
-                        1000
+
                     ],
                     "scheduler_type": "multistep",
                     "step_every_batch": false
@@ -95,9 +95,9 @@
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
-                    "decay_factor": 0.5,
+        
                     "epoch_schedule": [
-                        1000
+                        
                     ],
                     "scheduler_type": "multistep",
                     "step_every_batch": false

@@ -31,7 +31,7 @@ The recommended starting variant uses batch size 32, five preceding observation
 steps before the CaMI decision time, ten future action/contact steps, and a
 100-epoch state-loss warmup. The prediction head is disabled. Training remains
 2,000 epochs, with 50 rollout episodes every 50 epochs, validation enabled,
-learning rates of 1e-4 halved after epoch 1,000, and best-success checkpoint saving.
+a constant learning rate of 1e-4, and best-success checkpoint saving.
 All bundled v3 variants use seed 0. This is not a guarantee of GPU determinism.
 
 For the matching no-CaMI baseline, run the same command with:
@@ -108,7 +108,7 @@ every number the report gives (state weight 0.01, trajectory weight 1, EMA
 momentum 0.995, ten future actions, Huber delta 0.1, contact temperature 0.05,
 gamma 1, MSE-only BC, a 1024-d policy feature, a 1024-128-128 state projector, a
 one-layer action LSTM of 256 and a 256-128-128 trajectory head), and `faithful`
-sets them explicitly. It differs from `reference` in four things:
+sets them explicitly. It differs from `reference` in three things:
 
 - the descriptor channels are averaged (weights 1/3, summing to 1) rather than
   summed, so that a pair differing by x in every channel gets the report's weight
@@ -116,7 +116,6 @@ sets them explicitly. It differs from `reference` in four things:
   three times that distance;
 - the rollout hidden state is reset every `rnn.horizon` = 11 steps, which is also
   the training sequence length (`reference` trains on 11 and resets every 10);
-- the learning rate is constant (no halving at epoch 1000);
 - every demonstration is used, with no validation split, so that the run is an
   ordinary BC-RNN run apart from the CaMI terms.
 
@@ -153,7 +152,7 @@ the others are intended extensions or open points.
 | Prediction head | None (it names a prediction head as a separate probe, section 9) | `prediction*` add a head (weight 0.01 times the ramp) whose input is the policy feature and a detached action embedding *(removed in `faithful`)* |
 | Padding | Left to be specified | BC loss ignores padded steps. Snippets are packed to their real length, and anchors with no future action have zero CaMI loss |
 | Rollout hidden state | Not specified | Reset every `rnn.horizon` steps. Variants train on 11 or 16 steps but reset every 10 *(aligned in `faithful`)* |
-| Learning rate, validation | Not specified | `reference` and the other variants halve the rate at epoch 1000 and train on the `train` split, validating on `valid`; the `faithful` pair does neither |
+| Learning rate, validation | Not specified | Constant learning rate of 1e-4 in every variant. Except the `faithful` pair, they train on the `train` split and validate on `valid` |
 | Policy | BC-RNN with one latent per sample | Deterministic BC-RNN (no GMM); the feature is the last actor layer |
 
 For the report's own descriptor (force magnitude from `obs/force`), use the

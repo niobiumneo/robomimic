@@ -216,6 +216,18 @@ def resolved(name):
     return json.loads(cfg.dump())
 
 
+def test_no_v3_config_schedules_the_learning_rate():
+    """v3 trains at a constant 1e-4 in every variant and in the class default (v2 halves it at epoch 1000)."""
+    defaults = json.loads(config_factory("bc_cami_v3").dump())
+    assert set(defaults["algo"]["optim_params"]) == {"policy", "cami"}
+    configs = {"class default": defaults, **{name: resolved(name) for name in make_configs()}}
+    assert len(configs) == 12
+    for name, config in configs.items():
+        for optimizer in ("policy", "cami"):
+            rate = config["algo"]["optim_params"][optimizer]["learning_rate"]
+            assert rate["epoch_schedule"] == [] and rate["initial"] == 1e-4, (name, optimizer, rate)
+
+
 def test_faithful_pair_uses_the_reports_values_and_differs_only_in_the_method():
     on, off = flatten(resolved("bc_cami_square_contactNetsv3_faithful.json")), flatten(resolved("bc_rnn_square_v3_baseline_faithful.json"))
     differing = {key for key in set(on) | set(off) if on.get(key) != off.get(key)}
@@ -233,9 +245,8 @@ def test_faithful_pair_uses_the_reports_values_and_differs_only_in_the_method():
         "algo.cami.v3.context_steps": 0, "algo.cami.v3.warmup_epochs": 0, "algo.cami.v3.prediction.enabled": False,
         # one anchor and its ten future actions, which is also the period of the rollout hidden-state reset
         "train.seq_length": 11, "algo.rnn.horizon": 11,
-        # an ordinary BC-RNN run: all demonstrations, no split, constant learning rate
+        # an ordinary BC-RNN run: all demonstrations and no split
         "train.hdf5_filter_key": None, "train.hdf5_validation_filter_key": None, "experiment.validate": False,
-        "algo.optim_params.policy.learning_rate.epoch_schedule": [], "algo.optim_params.cami.learning_rate.epoch_schedule": [],
         "train.batch_size": 16, "train.seed": 0, "train.max_grad_norm": 1}
     for key, value in expected.items():
         assert on[key] == value, key
@@ -368,8 +379,6 @@ def test_real_v3_entry_point_and_checkpoint(data_path, tmp_path):
         cfg.experiment.epoch_every_n_steps = 2
         cfg.experiment.validation_epoch_every_n_steps = 1
         cfg.algo.cami.v3.warmup_epochs = 1
-        for name in ("policy", "cami"):
-            cfg.algo.optim_params[name].learning_rate.epoch_schedule = [1]
     path = tmp_path / "config.json"
     path.write_text(json.dumps(cfg.to_dict()))
     result = subprocess.run([sys.executable, "-m", "robomimic.scripts.train_cami_v3",
@@ -381,7 +390,7 @@ def test_real_v3_entry_point_and_checkpoint(data_path, tmp_path):
     checkpoint = torch.load(run / "last.pth", map_location="cpu", weights_only=False)
     assert checkpoint["model"]["cami_v3_gradient_steps"] == 4
     for name in ("policy", "cami"):
-        assert checkpoint["model"]["optimizers"][name]["param_groups"][0]["lr"] == pytest.approx(5e-5)
+        assert checkpoint["model"]["optimizers"][name]["param_groups"][0]["lr"] == pytest.approx(1e-4)
     policy, _ = file_utils.policy_from_checkpoint(ckpt_path=str(run / "last.pth"), device=torch.device("cpu"))
     with h5py.File(data_path) as f:
         observation = {key: f["data/demo_0/obs/" + key][0] for key in cfg.all_obs_keys}

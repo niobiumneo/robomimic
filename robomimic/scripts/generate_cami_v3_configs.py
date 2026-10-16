@@ -32,17 +32,14 @@ def _faithful(config):
     LSTM of 256 and a 256-128-128 trajectory head). Descriptor channels are averaged
     (weights 1/3) so a pair that differs by x in every channel gets the weight of the report's
     single-channel curve, not three times its distance. The remaining choices make the run an
-    exact twin of an ordinary BC-RNN run: constant learning rate, every demonstration used,
-    no validation split, and the training sequence length is also the rollout hidden-state
-    reset period.
+    exact twin of an ordinary BC-RNN run: every demonstration used, no validation split, and the
+    training sequence length is also the rollout hidden-state reset period.
     """
     train, cami, algo = config["train"], config["algo"]["cami"], config["algo"]
     train.update(seq_length=cami["snippet_horizon"] + 1, batch_size=16, seed=0, hdf5_filter_key=None,
                  hdf5_validation_filter_key=None)
     config["experiment"]["validate"] = False
     algo["rnn"]["horizon"] = train["seq_length"]
-    for name, optim in algo["optim_params"].items():
-        optim["learning_rate"].update(decay_factor=.1, epoch_schedule=[])
     cami.update(state_loss_weight=.01, traj_loss_weight=1., momentum=.995, use_momentum_target=True,
                 snippet_horizon=10, temperature=.07, normalize_embeddings=True, contrastive_dim=128,
                 query_proj_layers=[128], key_proj_layers=[128], snippet_hidden_dim=256, snippet_num_layers=1)
@@ -61,6 +58,9 @@ def make_configs():
     base["train"]["data"] = [{"path": "dataset/square_image_84_contactnets_state.hdf5"}]
     optim = base["algo"]["optim_params"]
     base["algo"]["optim_params"] = {"policy": deepcopy(optim["policy"]), "cami": deepcopy(optim["policy"])}
+    # v3 trains at a constant learning rate; the v2 template halves it at epoch 1000.
+    for name in ("policy", "cami"):
+        base["algo"]["optim_params"][name]["learning_rate"].update(decay_factor=.1, epoch_schedule=[])
     base["algo"]["cami"]["v3"] = {
         "context_steps": 5, "warmup_epochs": 100, "gradient_diagnostics_every": 100,
         "prediction": {"enabled": False, "features": ["gap"], "hidden_dims": [128],

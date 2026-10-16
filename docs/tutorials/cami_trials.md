@@ -29,21 +29,21 @@ python -m robomimic.scripts.train_trials \
   --quiet
 ```
 
-Give exactly one source for the training config, as with `train.py` and
-`train_cami_v3.py`:
+Give the training config as with `train.py` and `train_cami_v3.py`:
 
 | Option | Config used |
 |---|---|
-| `--config FILE` | A full template such as `robomimic/exps/templates/bc_cami_square.json` |
-| `--variant NAME` | A bundled CaMI v3 variant (`faithful`, `baseline_faithful`, `prediction`, ...) |
-| `--algo NAME` | The defaults of an algorithm, for example `--algo bc` with `--dataset` |
+| `--config FILE` | A template such as `robomimic/exps/templates/bc_cami_square.json`. What the file lacks comes from the algorithm's defaults |
+| `--variant NAME` | A bundled CaMI v3 variant (`faithful`, `baseline_faithful`, `prediction`, ...). Not combined with `--config` or `--algo` |
+| `--algo NAME` | The defaults of an algorithm, for example `--algo bc` with `--dataset`. Ignored when `--config` is given |
 
 Epochs, seed, rollout count and rate, and everything else come from that config.
 `--epochs`, `--seed`, `--rollouts` and `--rollout-rate` override it. `--name` (also
 spelled `--group`) names the experiment and its output folder; it defaults to a
 timestamp. `--quiet` is passed to `train.py`. Weights & Biases is used only when
-you ask for it, as in `train.py`: `--wandb`, `--wandb-project`, or an explicit
-`--wandb-mode online|offline`.
+you ask for it, as in `train.py`: `--wandb`, `--wandb-project`, an explicit
+`--wandb-mode online|offline`, or a config whose `experiment.logging.log_wandb` is
+true (`--wandb-mode disabled` overrides that).
 
 1. **Train one model** with `train.py`, using the config's `train.seed` or `--seed N`
    and its epoch count. The Square templates define an epoch as 500 gradient
@@ -275,8 +275,11 @@ If a trial fails again, the child's traceback is printed just above the
 not restore the complete RNG state of an uninterrupted run), and the same W&B
 training run continues, as does the evaluation run. A trial that failed is evaluated again into a new
 folder, so earlier files are preserved. The saved plan must match the resumed
-command. A manifest from the earlier ten-seed launcher is rejected; use a new
-`--name`.
+command; when it does not, the error names the first settings that differ. That
+includes a group planned from a bundled v3 template before the learning-rate
+schedule was removed (`git show 1aa437b:robomimic/exps/templates/<file>` gives
+that template); start a new `--name` instead if you prefer. A manifest from the
+earlier ten-seed launcher is rejected; use a new `--name`.
 
 To regenerate or upload the results of a completed group without running
 anything:
@@ -301,7 +304,9 @@ python -m robomimic.scripts.train_trials \
 ```
 
 Debug uses two epochs, three gradient steps per epoch, and two short rollouts in
-each trial. Use a new name for the full experiment. W&B is off unless you add
+each trial. Unlike `train.py --debug`, which writes to `/tmp/tmp_trained_models`,
+the group is kept under `--output-dir` and blocks the same `--name`, so use a new
+name for the full experiment (or delete the folder). W&B is off unless you add
 `--wandb-project NAME` (or `--wandb`). For offline logging, add `--wandb-mode
 offline`, then use the usual `wandb sync` on the saved W&B folders.
 
@@ -320,12 +325,16 @@ force-based Square config, copy `bc_cami_square.json`, set `algo_name` to `bc`,
 remove the `cami` block and the extra optimizers, and set `train.dataset_keys` to
 `["actions"]`, as `tests/test_rollout_best.py` does.
 
-To see every setting in which two trained models differ, compare their
-checkpoints:
+To see the settings in which trained models differ, compare their checkpoints. It
+lists differing settings, counts the bookkeeping ones it does not compare (names,
+logging, output directory, device and data-loader settings), and lists CaMI-only
+settings when every model uses CaMI:
 
 ```bash
-python -m robomimic.scripts.compare_checkpoint_configs A.pth B.pth --trust-checkpoints
+python -m robomimic.scripts.compare_checkpoint_configs A.pth B.pth
 ```
+
+Add `--trust-checkpoints` only if it says a file needs full unpickling.
 
 ## Validation
 

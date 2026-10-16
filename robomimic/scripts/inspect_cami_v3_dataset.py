@@ -28,6 +28,7 @@ import torch
 
 from robomimic.CAMI.continuous_contact import contact_distance, negative_weights
 from robomimic.config import config_factory
+from robomimic.utils.cami_dataset_utils import resolve_dataset_path
 
 CHANNELS = ("gap", "normal_impulse", "tangential_impulse")
 CLASSES = ("free", "near", "contact")
@@ -48,6 +49,19 @@ def load_config(variant=None, path=None):
     with config.values_unlocked():
         config.update(copy.deepcopy(ext))
     return config
+
+
+def dataset_path(config, override=None):
+    """The one dataset the report describes. Several entries, per-entry filters or demo limits are refused:
+    the trainer fits scales over every entry and applies each entry's own filter, which this report does not."""
+    entries = config.train.data
+    if isinstance(entries, str):
+        entries = [{"path": entries}]
+    entries = list(entries or [])
+    if len(entries) != 1 or any(k in entries[0] for k in ("filter_key", "demo_limit")):
+        raise ValueError("The report describes a single dataset entry without its own filter_key or demo_limit; "
+                         "this config has {} entries (or per-entry settings)".format(len(entries)))
+    return str(resolve_dataset_path(override if override else entries[0]["path"]))
 
 
 def _names(hdf5, key):
@@ -76,9 +90,11 @@ def load_pool(path, config):
             demo = f["data"][name]
             state, mask = demo["contact_state"][()], demo["contact_mask"][()].astype(bool)
             length = state.shape[0]
+            if length < 1 or (not train.pad_seq_length and length < train.seq_length):
+                raise ValueError("{}: invalid num_samples or sequence length".format(demo.name))
             series[name] = (state, mask)
             # pad_seq_length lets every timestep start a sequence; otherwise starts stop seq_length-1 early.
-            count = length if train.pad_seq_length else max(0, length - train.seq_length + 1)
+            count = length if train.pad_seq_length else length - train.seq_length + 1
             for start in range(count):
                 t = start + context
                 valid = max(0, min(horizon, length - 1 - t)) if t < length else 0
@@ -103,14 +119,15 @@ def fit_scales(pool, config):
         if given is not None:
             scales.append(float(given))
             continue
-        values = np.concatenate([s[0][:, 0, i][s[1][:, 0, i]] for s in pool["series"].values()])
+        values = np.concatenate([s[0][:, 0, i][s[1][:, 0, i]] for s in pool["series"].values()]).astype(np.float64)
         scales.append(float(values.std() + 1e-6))
     return scales
 
 
 def channel_statistics(pool, scales, cap):
     rows = []
-    values = [np.concatenate([s[0][:, 0, i][s[1][:, 0, i]] for s in pool["series"].values()]) for i in range(3)]
+    values = [np.concatenate([s[0][:, 0, i][s[1][:, 0, i]] for s in pool["series"].values()]).astype(np.float64)
+              for i in range(3)]
     total = sum(len(s[0]) for s in pool["series"].values())
     for i, (name, x) in enumerate(zip(CHANNELS, values)):
         q = np.quantile(x, [.5, .9, .99]) if len(x) else np.zeros(3)
@@ -122,6 +139,17 @@ def channel_statistics(pool, scales, cap):
             p50=float(q[0]), p90=float(q[1]), p99=float(q[2]),
             normalized_p50=float(q[0] / scales[i]), normalized_p90=float(q[1] / scales[i]), normalized_p99=float(q[2] / scales[i])))
     return rows
+
+
+def unobserved_gap_rows(pool):
+    """Rows with a measured normal impulse but no valid gap. A pair distance drops a whole timestep when any
+    weighted channel is missing, so these rows contribute no impulse to any W_ij while the gap weight is positive."""
+    rows = impulse_rows = 0
+    for state, mask in pool["series"].values():
+        measured = mask[:, 0, 1] & (state[:, 0, 1] > 0)
+        impulse_rows += int(measured.sum())
+        rows += int((measured & ~mask[:, 0, 0]).sum())
+    return dict(rows=rows, impulse_rows=impulse_rows, fraction=rows / impulse_rows if impulse_rows else 0.)
 
 
 def classify(pool, cap, threshold):
@@ -140,27 +168,37 @@ def onset_lags(pool, tolerance=3):
     Rows hold [gap at the start state of an action, impulse during that action]. A contact that
     begins inside an action therefore shows its impulse one row before its gap closes (-1); a contact
     that exists at the start state shows both in the same row (0).
+
+    A row whose gap is unobserved is skipped: it neither ends a touching run nor starts one, so the run
+    starts at the first observed gap<=0 after an observed gap>0 (or at the first observed row). Impulse
+    onsets come from the impulse mask alone. When the gap is unobserved at the true closing, the lag is
+    measured from the first observed row, so a lead of more than one row can partly be unobserved rows.
     """
     counts = {"<=-2": 0, "-1": 0, "0": 0, "+1": 0, ">=+2": 0, "no impulse nearby": 0}
     for state, mask in pool["series"].values():
         gap, impulse = state[:, 0, 0], state[:, 0, 1]
-        ok = mask[:, 0, 0] & mask[:, 0, 1]
-        touching = (gap <= 0) & ok
-        on = (impulse > 1e-9) & ok
+        on = (impulse > 1e-9) & mask[:, 0, 1]
         onsets = [k for k in range(len(on)) if on[k] and (k == 0 or not on[k - 1])]
-        for j in range(len(touching)):
-            if not touching[j] or (j > 0 and touching[j - 1]):
+        touching_before = False
+        for j in range(len(gap)):
+            if not mask[j, 0, 0]:
                 continue
-            window = [k for k in onsets if abs(k - j) <= tolerance]
-            if not window:
-                counts["no impulse nearby"] += 1
-                continue
-            lag = min(window, key=lambda k: (abs(k - j), k)) - j
-            counts["<=-2" if lag <= -2 else "-1" if lag == -1 else "0" if lag == 0 else "+1" if lag == 1 else ">=+2"] += 1
+            touching = bool(gap[j] <= 0)
+            if touching and not touching_before:
+                window = [k for k in onsets if abs(k - j) <= tolerance]
+                if not window:
+                    counts["no impulse nearby"] += 1
+                else:
+                    lag = min(window, key=lambda k: (abs(k - j), k)) - j
+                    counts["<=-2" if lag <= -2 else "-1" if lag == -1 else "0" if lag == 0 else "+1" if lag == 1 else ">=+2"] += 1
+            touching_before = touching
     return counts
 
 
-def weight_regime(pool, scales, config, labels, batch_size, batches, seed, overrides=None):
+def weight_regime(pool, scales, config, labels, batch_size, batches, seed, overrides=None, index_batches=None):
+    """Weights of random batches (or of the given index batches, for tests against the training module)."""
+    if batch_size > len(pool["lengths"]):
+        raise ValueError("batch size {} exceeds the {} anchors training would draw from".format(batch_size, len(pool["lengths"])))
     c = config.algo.cami.continuous
     settings = dict(feature_weights=list(c.feature_weights), contact_temperature=c.contact_temperature, gamma=c.gamma,
                     huber_delta=c.huber_delta, distance_penalty=c.distance_penalty, chunk_size=c.chunk_size)
@@ -172,8 +210,9 @@ def weight_regime(pool, scales, config, labels, batch_size, batches, seed, overr
     lengths = torch.as_tensor(pool["lengths"])
     near_zero, near_one, eff, loss, active, mid = [], [], [], [], [], []
     pair_count, pair_mass = np.zeros((3, 3)), np.zeros((3, 3))
-    for _ in range(batches):
-        idx = torch.as_tensor(rng.choice(len(windows), size=batch_size, replace=False if len(windows) >= batch_size else True))
+    for step in range(batches if index_batches is None else len(index_batches)):
+        idx = torch.as_tensor(rng.choice(len(windows), size=batch_size, replace=False) if index_batches is None
+                              else np.asarray(index_batches[step]))
         mask, length = masks[idx], lengths[idx]
         normalized = torch.where(mask, windows[idx], torch.zeros(())) / scale
         distance, valid = contact_distance(normalized, mask, settings["feature_weights"], settings["huber_delta"],
@@ -204,7 +243,7 @@ def weight_regime(pool, scales, config, labels, batch_size, batches, seed, overr
 
 def build_report(args):
     config = load_config(args.variant, args.config)
-    path = args.dataset or config.train.data[0]["path"]
+    path = dataset_path(config, args.dataset)
     pool = load_pool(path, config)
     meta = pool["meta"]
     scales = fit_scales(pool, config)
@@ -218,13 +257,15 @@ def build_report(args):
                   eligible_anchor_fraction=float(eligible.mean()), gap_cap=cap, binary_threshold=threshold,
                   reconstruction=meta.get("reconstruction"), channels=channel_statistics(pool, scales, cap),
                   classes={name: float((labels == i).sum() / max(1, eligible.sum())) for i, name in enumerate(CLASSES)},
-                  onset_lag=onset_lags(pool), settings={}, regimes={})
+                  onset_lag=onset_lags(pool), unobserved_gap=unobserved_gap_rows(pool), settings={}, regimes={},
+                  explicit_scales=[v for v in (config.algo.cami.continuous.gap_scale, config.algo.cami.continuous.normal_impulse_scale,
+                                               config.algo.cami.continuous.tangential_impulse_scale) if v is not None])
     c = config.algo.cami.continuous
     weights = np.asarray(c.feature_weights, dtype=float)
     cases = [("config as trained", {}),
              ("weights / sum (= contact_temperature x sum)", dict(feature_weights=(weights / weights.sum()).tolist())),
-             ("gap channel only", dict(feature_weights=[1., 0., 0.])),
-             ("impulse channels only", dict(feature_weights=[0., 1., 1.]))]
+             ("gap channel only", dict(feature_weights=[weights[0], 0., 0.])),
+             ("impulse channels only", dict(feature_weights=[0., weights[1], weights[2]]))]
     report["settings"] = dict(feature_weights=weights.tolist(), contact_temperature=c.contact_temperature, gamma=c.gamma,
                               huber_delta=c.huber_delta, distance_penalty=c.distance_penalty, scales=scales)
     for label, overrides in cases:
@@ -240,11 +281,19 @@ def flags(report):
             report["reconstruction"]["transitions_over_tolerance"]))
     if classes["contact"] < .05:
         out.append("WARN only {:.1%} of anchors have a window with an impulse above the binary threshold".format(classes["contact"]))
+    unobserved = report["unobserved_gap"]
+    if unobserved["fraction"] > .05 and report["settings"]["feature_weights"][0] > 0:
+        out.append("WARN {:.0%} of the rows with a measured impulse have no valid gap; every pair distance drops them "
+                   "while the gap weight is positive".format(unobserved["fraction"]))
     current = report["regimes"]["config as trained"]
+    total = current["pair_count"].sum()
+    free_free = current["pair_count"][0, 0] / total if total else 0.
     if current["near_zero_fraction"] > .5:
-        out.append("NOTE {:.0%} of pairs have W<0.01: the free-vs-free majority carries no contrastive signal".format(current["near_zero_fraction"]))
+        out.append("NOTE {:.0%} of pairs have W<0.01 ({:.0%} are free-vs-free pairs, which have W=0)".format(
+            current["near_zero_fraction"], free_free))
     if current["near_one_fraction"] > .5:
-        out.append("NOTE {:.0%} of pairs have W>0.99: weights are close to binary".format(current["near_one_fraction"]))
+        out.append("NOTE {:.0%} of pairs have W>0.99: the weights barely discriminate between negatives".format(
+            current["near_one_fraction"]))
     if current["anchors_with_any_negative"] < .5:
         out.append("NOTE only {:.0%} of anchors have a negative with W>0 in a batch of {}".format(
             current["anchors_with_any_negative"], report["batch_size"]))
@@ -263,7 +312,9 @@ def print_report(report):
         p("Reconstruction: {} | mujoco {} | robosuite {} | max qpos drift {:.3g} | over tolerance {}/{}".format(
             r.get("replay_mode"), r.get("mujoco_version"), r.get("robosuite_version"), r.get("max_qpos_replay_error", float("nan")),
             r.get("transitions_over_tolerance"), r.get("checked_transitions")))
-    p("\nChannels (offset-1 values of training demos; scale = std + 1e-6)")
+    explicit = report["explicit_scales"]
+    p("\nChannels (offset-1 values of training demos; scale = {})".format(
+        "std + 1e-6, or the configured value where one is set" if explicit else "std + 1e-6"))
     p("  {:<20}{:>8}{:>11}{:>9}{:>9}{:>9}{:>9}{:>9}".format("channel", "valid", "scale", "at cap", "<=0", "==0", "n.p90", "n.p99"))
     fmt = lambda x: "-" if x is None else "{:.1%}".format(x)
     for ch in report["channels"]:
@@ -273,11 +324,14 @@ def print_report(report):
     c = report["classes"]
     p("\nAnchor windows (cap {:.3g} m, binary threshold {:.3g} N*s)".format(report["gap_cap"], report["binary_threshold"]))
     p("  free {:.1%} | near (gap below the cap or small impulses) {:.1%} | contact {:.1%}".format(c["free"], c["near"], c["contact"]))
-    p("  impulse onset row - gap<=0 row (rows; -1 = contact began inside the action): " + ", ".join(
+    p("  impulse onset row - gap<=0 row (rows; -1 = contact began inside the action; observed gaps only): " + ", ".join(
         "{} {}".format(k, v) for k, v in report["onset_lag"].items()))
+    u = report["unobserved_gap"]
+    p("  rows with a measured impulse but no valid gap: {} of {} ({:.1%})".format(u["rows"], u["impulse_rows"], u["fraction"]))
     s = report["settings"]
-    p("\nWeights W_ij of random batches of {} (weights {}, tau_c {}, gamma {}, {} delta {})".format(
-        report["batch_size"], s["feature_weights"], s["contact_temperature"], s["gamma"], s["distance_penalty"], s["huber_delta"]))
+    p("\nWeights W_ij of random batches of {} (weights {}, tau_c {}, gamma {}, {})".format(
+        report["batch_size"], [round(w, 4) for w in s["feature_weights"]], s["contact_temperature"], s["gamma"],
+        "huber delta {}".format(s["huber_delta"]) if s["distance_penalty"] == "huber" else s["distance_penalty"]))
     p("  {:<42}{:>9}{:>9}{:>9}{:>10}{:>10}{:>11}".format("case", "W<.01", "W>.99", "median", "sum_j W", "any neg", "init loss"))
     for label, r in report["regimes"].items():
         p("  {:<42}{:>9.1%}{:>9.1%}{:>9.3f}{:>10.2f}{:>10.1%}{:>11.3f}".format(
@@ -300,7 +354,7 @@ def print_report(report):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dataset", help="Prepared physics dataset (default: the config's train.data[0].path)")
+    parser.add_argument("--dataset", help="Prepared physics dataset (default: the config's train.data path)")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--variant", help="v3 variant name, e.g. prediction")
     source.add_argument("--config", help="Path to a v3 config JSON")

@@ -102,8 +102,10 @@ of `history`, `warmup` and `prediction`; `baseline_reference` matches `reference
 
 ### `faithful` and `baseline_faithful`
 
-`faithful` follows the October 2026 formulation report wherever the report fixes
-a value, and uses its most direct reading elsewhere. `reference` already uses
+`faithful` follows the October 2026 formulation report's loss, weights, EMA update,
+anchor, snippet horizon and numbers, but **not its descriptor**: it weights negatives by the
+three reconstructed channels (gap, normal and tangential impulse), not by recorded force
+magnitude. For the report's own descriptor use the force-based `bc_cami` path. `reference` already uses
 every number the report gives (state weight 0.01, trajectory weight 1, EMA
 momentum 0.995, ten future actions, Huber delta 0.1, contact temperature 0.05,
 gamma 1, MSE-only BC, a 1024-d policy feature, a 1024-128-128 state projector, a
@@ -116,22 +118,27 @@ sets them explicitly. It differs from `reference` in three things:
   three times that distance;
 - the rollout hidden state is reset every `rnn.horizon` = 11 steps, which is also
   the training sequence length (`reference` trains on 11 and resets every 10);
-- every demonstration is used, with no validation split, so that the run is an
-  ordinary BC-RNN run apart from the CaMI terms.
+- every demonstration is used, with no validation split, so that the pair trains on
+  the same data as a plain BC-RNN run.
 
 Like `reference`, it anchors at the first policy feature, keeps the state weight
 constant from epoch one, trains no prediction head, and uses batch size 16 and
 seed 0.
 
-`baseline_faithful` is its twin without CaMI. The two configs differ only in
-`algo.cami.enabled` and `train.dataset_keys`, and a test keeps it that way. To
-compare with an earlier `train.py` baseline, check that its checkpoint differs
-from `baseline_faithful` in nothing you care about:
+`baseline_faithful` is its twin without CaMI: a BC-RNN run through the v3 adapter.
+The two configs differ only in `algo.cami.enabled` and `train.dataset_keys`, and a
+test keeps it that way. Compare `faithful` with `baseline_faithful`. A `train.py`
+BC-RNN run is a looser comparison: besides any config differences, the v3 adapter
+excludes padded steps from the BC loss, which a config comparison cannot show.
+To see the config differences with an earlier `train.py` baseline:
 
 ```bash
 python -m robomimic.scripts.compare_checkpoint_configs \
-  your_train_py_baseline.pth baseline_faithful.pth --trust-checkpoints
+  your_train_py_baseline.pth baseline_faithful.pth
 ```
+
+Match its `train.seq_length` and `algo.rnn.horizon` (11), seed (0) and
+`train.max_grad_norm` where they differ, if you want it closer.
 
 ## Differences from the formulation report
 
@@ -258,14 +265,18 @@ sequence and the anchor sits `context_steps` in, so `reference` and
   zero impulses, and the 90th/99th percentiles in scale units;
 - the share of anchor windows that are `free` (every gap at the cap, no impulse),
   `near` (anything between) and `contact` (a normal impulse above the binary
-  threshold), and the offset between each gap-closing and its impulse onset;
+  threshold), the offset between each gap-closing and its impulse onset (over
+  observed gap rows), and how many rows with a measured impulse have no valid gap.
+  A pair distance drops a whole timestep when any weighted channel is missing, so
+  those rows add no impulse to any weight while the gap weight is positive;
 - for random batches of the configured size, the fraction of pairs with
   `W < 0.01` and `W > 0.99`, the mean `sum_j W_ij`, the share of anchors with
   any negative, and `init loss = mean_i log(1 + sum_j W_ij)`, the state loss an
   embedding with equal logits would score;
 - a table of which window classes contribute the negative weight, and the same
-  statistics under per-channel weights divided by their sum (identical to a
-  contact temperature multiplied by that sum), gap only and impulses only.
+  statistics under the configured weights divided by their sum (identical to a
+  contact temperature multiplied by that sum), with only the gap channel and with
+  only the two impulse channels, each keeping its configured weight.
 
 Free-versus-free pairs have `W = 0` exactly, so `weight/near_zero_fraction` in
 the W&B metrics is close to the square of the free share printed here. A state
@@ -277,8 +288,10 @@ mainly asks whether contact is coming, not how hard it will be.
 
 To compare a v3 variant with another run, diff the saved `config.json` of both
 runs. Compare v3 variants with the v3 `baseline` or `baseline_reference`, which
-share their batch size, sequence length, seed, learning-rate schedule and
-validation split. Runs from `train.py` with another config also differ in those.
+share their batch size, sequence length, seed and validation split, and compare
+`faithful` with `baseline_faithful`. `baseline_reference` has a validation split
+and resets the hidden state every 10 steps, so it is the wrong control for
+`faithful`. Runs from `train.py` with another config also differ in those.
 
 ## Diagnostics and customization
 

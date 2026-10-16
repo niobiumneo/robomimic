@@ -216,6 +216,17 @@ def resolved(name):
     return json.loads(cfg.dump())
 
 
+def test_committed_templates_are_what_the_generator_writes():
+    from robomimic.scripts.generate_cami_v3_configs import VARIANT_CONFIGS
+    templates = ROOT / "robomimic/exps/templates"
+    configs = make_configs()
+    for variant, filename in VARIANT_CONFIGS.items():
+        assert json.loads((templates / filename).read_text()) == configs[filename], variant
+        rates = json.loads((templates / filename).read_text())["algo"]["optim_params"]
+        for optimizer in ("policy", "cami"):
+            assert rates[optimizer]["learning_rate"]["epoch_schedule"] == [], (variant, optimizer)
+
+
 def test_no_v3_config_schedules_the_learning_rate():
     """v3 trains at a constant 1e-4 in every variant and in the class default (v2 halves it at epoch 1000)."""
     defaults = json.loads(config_factory("bc_cami_v3").dump())

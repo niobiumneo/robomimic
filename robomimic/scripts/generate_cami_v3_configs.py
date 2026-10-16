@@ -24,16 +24,18 @@ VARIANT_CONFIGS = {
 def _faithful(config):
     """Settings of the formulation report (October 2026) that the report leaves to the experiment.
 
-    The anchor is the first policy feature (offset 0), so the sequence holds the anchor and its
-    ten future actions. State loss weight is constant, with no prediction head. The report's
-    values are used for every number it gives: lambda_s 0.01, lambda_t 1, EMA momentum 0.995,
-    snippet horizon 10, Huber delta 0.1, contact temperature 0.05, gamma 1, MSE-only BC, the
-    example encoder sizes (1024-d policy feature, state projector 1024-128-128, one-layer
-    LSTM of 256 and a 256-128-128 trajectory head). Descriptor channels are averaged
-    (weights 1/3) so a pair that differs by x in every channel gets the weight of the report's
-    single-channel curve, not three times its distance. The remaining choices make the run an
-    exact twin of an ordinary BC-RNN run: every demonstration used, no validation split, and the
-    training sequence length is also the rollout hidden-state reset period.
+    The report's loss, weights, EMA update, anchor, snippet horizon and example sizes are used; its
+    descriptor is not: the three reconstructed channels (gap, normal and tangential impulse) replace the
+    recorded force magnitude, so this is the report's method on a different descriptor. The anchor is the
+    first policy feature (offset 0), so the sequence holds the anchor and its ten future actions. The state
+    loss weight is constant, with no prediction head. The report's values are set for every number it gives:
+    lambda_s 0.01, lambda_t 1, EMA momentum 0.995, snippet horizon 10, Huber delta 0.1, contact temperature
+    0.05, gamma 1, MSE-only BC, the example encoder sizes (1024-d policy feature, state projector
+    1024-128-128, one-layer LSTM of 256 and a 256-128-128 trajectory head). Descriptor channels are averaged
+    (weights 1/3) so a pair that differs by x in every channel gets the weight of the report's single-channel
+    curve, not three times its distance. The remaining choices keep the pair a plain BC-RNN run through the
+    v3 adapter plus the CaMI terms: every demonstration used, no validation split, and the training sequence
+    length is also the rollout hidden-state reset period.
     """
     train, cami, algo = config["train"], config["algo"]["cami"], config["algo"]
     train.update(seq_length=cami["snippet_horizon"] + 1, batch_size=16, seed=0, hdf5_filter_key=None,

@@ -45,9 +45,12 @@ def prepared(tmp_path):
     return output
 
 
-@pytest.mark.parametrize("variant", ["prediction", "reference", "baseline_reference"])
-def test_anchor_pool_is_the_loaders_anchor_pool(prepared, variant):
+@pytest.mark.parametrize("variant, pad", [("prediction", True), ("reference", True), ("baseline_reference", True),
+                                         ("prediction", False), ("faithful", True)])
+def test_anchor_pool_is_the_loaders_anchor_pool(prepared, variant, pad):
     config = inspect_labels.load_config(variant)
+    with config.values_unlocked():
+        config.train.pad_seq_length = pad
     pool = inspect_labels.load_pool(str(prepared), config)
     horizon, context = config.algo.cami.snippet_horizon, config.algo.cami.v3.context_steps
     dataset = SequenceDataset(
@@ -67,21 +70,65 @@ def test_anchor_pool_is_the_loaders_anchor_pool(prepared, variant):
             expected.append(key(length, item["contact_state"][context], mask))
         actual = [key(l, w, m) for l, w, m in zip(pool["lengths"], pool["windows"], pool["mask"])]
         assert sorted(actual) == sorted(expected)
-        assert pool["names"] == ["demo_0", "demo_1", "demo_2"]
+        # the faithful variant has no filter key and trains on every demonstration
+        assert pool["names"] == (["demo_0", "demo_1", "demo_2", "demo_3"] if variant == "faithful"
+                                 else ["demo_0", "demo_1", "demo_2"])
+        assert len(pool["lengths"]) == len(dataset)
     finally:
         dataset.close_and_delete_hdf5_handle()
 
 
-def test_scales_are_the_trainers_training_fit(prepared):
-    config = inspect_labels.load_config("prediction")
+def trainer_scales(path, variant):
+    """The scales prepare_contactnets_datasets fits for this dataset and variant."""
+    from robomimic.utils.contactnets_dataset_utils import prepare_contactnets_datasets
+    config = inspect_labels.load_config(variant)
+    with config.values_unlocked():
+        config.train.data = [{"path": str(path)}]
+        config.observation.modalities.obs.low_dim = ["robot0_eef_pos"]
+        config.observation.modalities.obs.rgb = []
+    prepare_contactnets_datasets(config, require_rnn=False)
+    c = config.algo.cami.continuous
+    return [c.gap_scale, c.normal_impulse_scale, c.tangential_impulse_scale]
+
+
+@pytest.mark.parametrize("variant", ["prediction", "faithful"])
+def test_scales_are_the_trainers_training_fit(prepared, variant):
+    config = inspect_labels.load_config(variant)
+    pool = inspect_labels.load_pool(str(prepared), config)
+    assert inspect_labels.fit_scales(pool, config) == pytest.approx(trainer_scales(prepared, variant), rel=1e-9)
+
+
+def make_module(scales, config, horizon, batch):
+    from robomimic.CAMI.cami_v3 import CaMIV3
+    c, a = config.algo.cami.continuous, config.algo.cami
+    settings = dict(
+        snippet_horizon=horizon, temperature=a.temperature, normalize_embeddings=True, contrastive_dim=8,
+        query_proj_layers=[8], key_proj_layers=[8], snippet_hidden_dim=8, snippet_num_layers=1, momentum=.9,
+        use_momentum_target=True, feature_scales=list(scales), feature_weights=list(c.feature_weights),
+        contact_temperature=c.contact_temperature, gamma=c.gamma, huber_delta=c.huber_delta, chunk_size=c.chunk_size,
+        distance_penalty=c.distance_penalty, prediction_enabled=False, prediction_indices=[0],
+        prediction_hidden_dims=[8], prediction_huber_delta=.1)
+    return CaMIV3(8, 7, settings)
+
+
+@pytest.mark.parametrize("variant", ["prediction", "faithful"])
+def test_weight_regime_equals_the_training_module_on_the_same_batches(prepared, variant):
+    config = inspect_labels.load_config(variant)
     pool = inspect_labels.load_pool(str(prepared), config)
     scales = inspect_labels.fit_scales(pool, config)
-    with h5py.File(prepared) as f:
-        rows = [(f["data/" + n + "/contact_state"][:, 0], f["data/" + n + "/contact_mask"][:, 0].astype(bool))
-                for n in ("demo_0", "demo_1", "demo_2")]
-    for i in range(3):
-        values = np.concatenate([s[:, i][m[:, i]] for s, m in rows])
-        assert scales[i] == pytest.approx(values.std() + 1e-6)
+    horizon = config.algo.cami.snippet_horizon
+    labels = inspect_labels.classify(pool, .02, 0.)
+    module = make_module(scales, config, horizon, 16)
+    rng = np.random.default_rng(5)
+    for _ in range(4):
+        idx = rng.choice(len(pool["lengths"]), 16, replace=False)
+        _, stats = module(torch.zeros(16, 8), torch.zeros(16, horizon, 7), torch.as_tensor(pool["lengths"][idx]),
+                          torch.as_tensor(pool["windows"][idx], dtype=torch.float32), torch.as_tensor(pool["mask"][idx]).float())
+        ours = inspect_labels.weight_regime(pool, scales, config, labels, 16, 1, 0, index_batches=[idx])
+        assert ours["near_zero_fraction"] == pytest.approx(stats["weight/near_zero_fraction"].item(), abs=1e-6)
+        assert ours["near_one_fraction"] == pytest.approx(stats["weight/near_one_fraction"].item(), abs=1e-6)
+        assert ours["effective_negatives"] == pytest.approx(stats["state/effective_negatives"].item(), rel=1e-4)
+        assert ours["anchors_with_any_negative"] == pytest.approx(stats["state/valid_anchor_fraction"].item(), abs=1e-6)
 
 
 def test_two_anchor_weight_matches_the_formula():
@@ -124,6 +171,64 @@ def test_onset_lag_reports_rows_between_gap_and_impulse():
     pool = dict(series={"demo_0": (state, np.ones_like(state, bool))})
     lags = inspect_labels.onset_lags(pool)
     assert lags["0"] == 1 and lags["-1"] == 1 and sum(lags.values()) == 2
+
+
+def test_onset_lag_does_not_split_a_contact_at_an_unobserved_gap_row():
+    state, mask = np.zeros((12, 10, 3)), np.ones((12, 10, 3), bool)
+    state[:, 0, 0] = .02
+    state[5:10, 0, 0] = -.001
+    state[5:10, 0, 1] = .3
+    mask[7, 0, 0] = False   # one unobserved gap row inside the contact: still one contact
+    lags = inspect_labels.onset_lags(dict(series={"demo_0": (state, mask)}))
+    assert lags["0"] == 1 and sum(lags.values()) == 1
+    mask[:] = True
+    mask[5:7, 0, 0] = False  # gap unobserved at the closing: measured from the first observed row, two rows after the impulse
+    lags = inspect_labels.onset_lags(dict(series={"demo_0": (state, mask)}))
+    assert lags["<=-2"] == 1 and sum(lags.values()) == 1
+
+
+def test_rows_with_an_impulse_but_no_gap_are_counted():
+    state, mask = np.zeros((6, 10, 3)), np.ones((6, 10, 3), bool)
+    state[1:4, 0, 1] = .2
+    mask[2:4, 0, 0] = False
+    assert inspect_labels.unobserved_gap_rows(dict(series={"d": (state, mask)})) == dict(rows=2, impulse_rows=3, fraction=2 / 3)
+
+
+def test_ablation_rows_keep_the_configs_weights(prepared):
+    report = inspect_labels.main(["--dataset", str(prepared), "--variant", "faithful", "--batch-size", "8", "--batches", "3"])
+    config = inspect_labels.load_config("faithful")
+    pool = inspect_labels.load_pool(str(prepared), config)
+    scales, labels = inspect_labels.fit_scales(pool, config), inspect_labels.classify(pool, .02, report["binary_threshold"])
+    third = 1. / 3
+    for row, weights in (("gap channel only", [third, 0., 0.]), ("impulse channels only", [0., third, third])):
+        expected = inspect_labels.weight_regime(pool, scales, config, labels, 8, 3, 0, overrides=dict(feature_weights=weights))
+        assert report["regimes"][row]["effective_negatives"] == pytest.approx(expected["effective_negatives"])
+
+
+def test_inputs_the_trainer_would_refuse_are_refused(prepared):
+    config = inspect_labels.load_config("prediction")
+    pool = inspect_labels.load_pool(str(prepared), config)
+    with pytest.raises(ValueError, match="exceeds the"):
+        inspect_labels.weight_regime(pool, [1., 1., 1.], config, np.zeros(len(pool["lengths"])), len(pool["lengths"]) + 1, 1, 0)
+    short = inspect_labels.load_config("prediction")
+    with short.values_unlocked():
+        short.train.pad_seq_length, short.train.seq_length = False, 31
+    with pytest.raises(ValueError, match="invalid num_samples or sequence length"):
+        inspect_labels.load_pool(str(prepared), short)
+    for entries in ([{"path": "a"}, {"path": "b"}], [{"path": "a", "filter_key": "valid"}], [{"path": "a", "demo_limit": 3}], []):
+        many = inspect_labels.load_config("prediction")
+        with many.values_unlocked():
+            many.train.data = entries
+        with pytest.raises(ValueError, match="single dataset entry"):
+            inspect_labels.dataset_path(many)
+
+
+def test_dataset_path_accepts_a_string_and_resolves_relative_paths(prepared, monkeypatch):
+    config = inspect_labels.load_config("prediction")
+    with config.values_unlocked():
+        config.train.data = str(prepared)
+    assert inspect_labels.dataset_path(config) == str(prepared)
+    assert inspect_labels.dataset_path(config, str(prepared)) == str(prepared)
 
 
 def test_report_runs_and_json_is_written_once(prepared, tmp_path, capsys):

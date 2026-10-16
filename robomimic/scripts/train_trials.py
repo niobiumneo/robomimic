@@ -9,10 +9,12 @@ and adds the trials. Run from the repository root, in the environment of train.p
     python -m robomimic.scripts.train_trials --config CONFIG --dataset DATASET --name NAME --n-trials 10
     python -m robomimic.scripts.train_trials --algo bc --dataset DATASET --name NAME --n-trials 10
 
-The config comes from exactly one of --config (a full template), --variant or --algo (the
-algorithm's defaults, as with train.py). Epochs, seed and rollout settings come from it unless
-you override them with --epochs, --seed, --rollouts, --rollout-rate. Weights & Biases is used only
-when you ask for it (--wandb, --wandb-project or --wandb-mode), as with train.py.
+The config comes from --config (a template; what it lacks comes from the algorithm's defaults),
+--variant (a bundled CaMI v3 config) or --algo (the algorithm's defaults; ignored when --config is
+given, as with train.py). Epochs, seed and rollout settings come from it unless you override them
+with --epochs, --seed, --rollouts, --rollout-rate. Weights & Biases is used only when you ask for
+it (--wandb, --wandb-project or --wandb-mode) or the config's experiment.logging.log_wandb is true,
+as with train.py. A --debug group is kept under --output-dir, so use a new --name for the real run.
 
 Or skip training and evaluate a model you already have, either one checkpoint
 or the best-success checkpoint of an existing run:
@@ -71,46 +73,76 @@ def write_csv(path, fieldnames, rows):
         writer.writerows(rows)
 
 
-REQUIRED_SETTINGS = (("algo_name",), ("train", "data"), ("train", "seed"), ("train", "num_epochs"),
-                     ("experiment", "rollout"), ("experiment", "save"), ("experiment", "logging"))
+# What the launcher reads from a config. A config that lacks one of these (train.py accepts partial
+# configs and fills them from the algorithm's defaults) gets the algorithm's default for it; keys a
+# config already has are never touched, so a plan made from a full template keeps its identity.
+LAUNCHER_SETTINGS = (("train", "data"), ("train", "seed"), ("train", "num_epochs"), ("experiment", "rollout", "n"),
+                     ("experiment", "rollout", "rate"), ("experiment", "rollout", "horizon"),
+                     ("experiment", "save"), ("experiment", "logging"))
+DEFAULT_OUTPUT_DIR = str(REPO_ROOT / "trained_models")
+
+
+def _lookup(node, path):
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return KeyError
+        node = node[key]
+    return node
+
+
+def fill_launcher_settings(config):
+    if "algo_name" not in config:
+        raise ValueError("The config has no algo_name. Use a full template (such as a bundled variant) or --algo")
+    missing = [path for path in LAUNCHER_SETTINGS if _lookup(config, path) is KeyError]
+    if missing:
+        from robomimic.config import config_factory
+        defaults = json.loads(config_factory(config["algo_name"]).dump())
+        for path in missing:
+            node = config
+            for key in path[:-1]:
+                node = node.setdefault(key, {})
+            node[path[-1]] = copy.deepcopy(_lookup(defaults, path))
+    return config
 
 
 def load_config(args):
     """The training config as a dictionary, from --config, --variant or --algo (the choices train.py has).
 
-    --config and --variant files are used as written, so a template keeps the identity it had when an
-    earlier experiment was planned from it. --algo starts from the algorithm's defaults, as in train.py.
+    --config and --variant files are used as written, apart from filling in what the launcher needs and
+    the file lacks, so a template keeps the identity it had when an earlier experiment was planned from it.
+    --algo starts from the algorithm's defaults, as in train.py. As in train.py, --algo is ignored when a
+    --config is also given (train_cami_v3.py passes both).
     """
-    sources = [name for name in ("config", "variant", "algo") if getattr(args, name, None)]
-    if len(sources) != 1:
-        raise ValueError("Give exactly one of --config, --variant or --algo to train a model "
-                         "(or --checkpoint / --run-dir to evaluate one)")
-    if sources[0] == "config":
+    if getattr(args, "variant", None) and (getattr(args, "config", None) or getattr(args, "algo", None)):
+        raise ValueError("--variant selects a bundled config; do not combine it with --config or --algo")
+    source = ("config" if getattr(args, "config", None) else "variant" if getattr(args, "variant", None)
+              else "algo" if getattr(args, "algo", None) else None)
+    if source is None:
+        raise ValueError("Give a training config: --config, --variant or --algo "
+                         "(or --checkpoint / --run-dir to evaluate a model)")
+    if source == "config":
         config = json.loads(Path(args.config).expanduser().read_text(encoding="utf-8"))
-    elif sources[0] == "variant":
+    elif source == "variant":
         path = REPO_ROOT / "robomimic/exps/templates" / VARIANT_CONFIGS[args.variant]
         config = json.loads(path.read_text(encoding="utf-8"))
     else:
         from robomimic.config import config_factory
         config = json.loads(config_factory(args.algo).dump())
-    for path in REQUIRED_SETTINGS:
-        node = config
-        for key in path:
-            node = node.get(key, KeyError) if isinstance(node, dict) else KeyError
-        if node is KeyError:
-            raise ValueError("The config has no {}. Use a full template (such as a bundled variant) or "
-                             "--algo for the algorithm's defaults".format(".".join(path)))
-    return config
+    return fill_launcher_settings(config)
 
 
 def resolve_wandb_mode(args):
-    """Weights & Biases is opt-in, like train.py: --wandb, --wandb-project or an explicit --wandb-mode."""
+    """The W&B mode that was asked for on the command line, or None when nothing was asked for.
+
+    Weights & Biases is opt-in, like train.py: --wandb, --wandb-project or an explicit --wandb-mode. A config
+    whose experiment.logging.log_wandb is true also asks for it (see make_plan), as it does in train.py.
+    """
     mode = getattr(args, "wandb_mode", None)
     if mode is not None:
         return mode
     if getattr(args, "wandb", False) or getattr(args, "wandb_project", None):
         return os.environ.get("WANDB_MODE") or "online"
-    return "disabled"
+    return None
 
 
 def make_plan(args):
@@ -134,6 +166,8 @@ def make_plan(args):
     experiment["rollout"]["enabled"] = True
     experiment["save"]["enabled"] = True
     experiment["save"]["on_best_rollout_success_rate"] = True
+    if not getattr(args, "wandb_requested", True) and experiment["logging"].get("log_wandb"):
+        args.wandb_mode = os.environ.get("WANDB_MODE") or "online"  # the config asks for W&B, as in train.py
     experiment["logging"]["log_wandb"] = args.wandb_mode != "disabled"
     if args.wandb_project:
         experiment["logging"]["wandb_proj_name"] = args.wandb_project
@@ -388,13 +422,29 @@ def evaluate_trial(entry, manifest, group_dir):
     write_json(manifest_path, manifest)
 
 
+def describe_changes(old, new, limit=6):
+    """The first few settings that differ between two plans, as 'path: old != new'."""
+    def flat(value, prefix=""):
+        if isinstance(value, dict):
+            return {k: v for key, item in value.items() for k, v in flat(item, prefix + "." + str(key) if prefix else str(key)).items()}
+        return {prefix: value}
+    a, b = flat(old), flat(new)
+    changes = ["{}: {} != {}".format(key, json.dumps(a.get(key, "<absent>"))[:40], json.dumps(b.get(key, "<absent>"))[:40])
+               for key in sorted(set(a) | set(b)) if a.get(key, "<absent>") != b.get(key, "<absent>")]
+    if not changes:
+        return "no setting differs in the plan (the signature changed)"
+    return "; ".join(changes[:limit]) + ("; and {} more".format(len(changes) - limit) if len(changes) > limit else "")
+
+
 def launch(args, group_dir):
     settings, signature = make_plan(args)
     manifest_path = group_dir / "manifest.json"
     if args.resume:
         manifest = load_manifest(group_dir)
         if manifest["signature"] != signature:
-            raise ValueError("Resume settings differ from the saved experiment plan")
+            raise ValueError("Resume settings differ from the saved experiment plan: {}. To resume a group planned "
+                             "before a template changed, use that version of the template (git show <commit>:<path>)."
+                             .format(describe_changes(manifest["settings"], settings)))
     else:
         manifest = new_manifest(args, group_dir, settings, signature)
         write_json(manifest_path, manifest)
@@ -618,7 +668,11 @@ def publish_report(report, manifest, result_dir, args, tracker=None):
 
 
 def run(args):
-    args.wandb_mode = resolve_wandb_mode(args)
+    requested = resolve_wandb_mode(args)
+    args.wandb_requested = requested is not None
+    args.wandb_mode = requested or "disabled"
+    if not getattr(args, "output_dir", None):
+        args.output_dir = DEFAULT_OUTPUT_DIR
     args.group = args.group or datetime.now().strftime("cami_%Y%m%d_%H%M%S_%f")
     if Path(args.group).name != args.group or args.group in (".", ".."):
         raise ValueError("Group must be a folder name without path separators")
@@ -650,10 +704,10 @@ def run(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", help="Full training config JSON, as for train.py")
+    parser.add_argument("--config", help="Training config JSON, as for train.py (settings it lacks come from the algorithm's defaults)")
     parser.add_argument("--variant", choices=sorted(VARIANT_CONFIGS),
                         help="Bundled CaMI v3 config, as for train_cami_v3.py")
-    parser.add_argument("--algo", help="Algorithm whose default config to train, as for train.py")
+    parser.add_argument("--algo", help="Algorithm whose default config to train, as for train.py (ignored when --config is given)")
     parser.add_argument("--dataset", help="Override train.data with this local dataset")
     parser.add_argument("--epochs", type=int, help="Training epochs (default: train.num_epochs of the config)")
     parser.add_argument("--seed", type=int, help="Training seed (default: train.seed of the config)")
@@ -671,7 +725,8 @@ def main(argv=None):
                         help="Override the rollout horizon of the checkpoint in the evaluation trials")
     parser.add_argument("--name", "--group", dest="group",
                         help="Name of the experiment (--group is the same option); defaults to a timestamped name")
-    parser.add_argument("--output-dir", default=str(REPO_ROOT / "trained_models"))
+    parser.add_argument("--output-dir",
+                        help="Where experiment folders go (default: trained_models in the repository)")
     parser.add_argument("--rollouts", type=int, help="Training evaluation episodes (default: config)")
     parser.add_argument("--rollout-rate", type=int, help="Evaluate every N epochs (default: config), plus final epoch")
     parser.add_argument("--metric-key", help="Dataset key for best success checkpoint selection")
@@ -710,10 +765,11 @@ def main(argv=None):
                          "training a model".format(
                              ", ".join("--" + name.replace("_", "-") for name in training_only)))
     elif not args.aggregate_only:
-        sources = [name for name in ("config", "variant", "algo") if getattr(args, name)]
-        if len(sources) != 1:
-            parser.error("give exactly one of --config, --variant or --algo to train a model "
+        if not (args.config or args.variant or args.algo):
+            parser.error("give --config, --variant or --algo to train a model "
                          "(or --checkpoint / --run-dir to evaluate one)")
+        if args.variant and (args.config or args.algo):
+            parser.error("--variant selects a bundled config; do not combine it with --config or --algo")
     if (args.resume or args.aggregate_only) and not args.group:
         parser.error("--name (or --group) is required for --resume or --aggregate-only")
     for name in ("n_trials", "epochs", "rollouts_per_trial", "video_skip", "horizon"):

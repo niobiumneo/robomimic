@@ -82,9 +82,14 @@
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
+<<<<<<< HEAD
                     "epoch_schedule": [
                         
                     ],
+=======
+                    "decay_factor": 0.1,
+                    "epoch_schedule": [],
+>>>>>>> refs/remotes/origin/contact-state
                     "scheduler_type": "multistep",
                     "step_every_batch": false
                 },
@@ -96,9 +101,14 @@
                 "optimizer_type": "adam",
                 "learning_rate": {
                     "initial": 0.0001,
+<<<<<<< HEAD
                     "epoch_schedule": [
                         
                     ],
+=======
+                    "decay_factor": 0.1,
+                    "epoch_schedule": [],
+>>>>>>> refs/remotes/origin/contact-state
                     "scheduler_type": "multistep",
                     "step_every_batch": false
                 },

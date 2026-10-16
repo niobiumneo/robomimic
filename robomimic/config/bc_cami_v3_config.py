@@ -16,6 +16,10 @@ class BCCaMIV3Config(BCCaMIContactNetsConfig):
 
     def algo_config(self):
         super().algo_config()
+        # v3 trains at a constant learning rate; the v2 default halves it at epoch 1000.
+        policy_rate = self.algo.optim_params.policy.learning_rate
+        policy_rate.decay_factor = .1
+        policy_rate.epoch_schedule = []
         # One optimizer owns the reusable module, including an optional head.
         self.algo.optim_params.cami = deepcopy(self.algo.optim_params.policy)
         for name in ("state_encoder", "snippet_encoder", "key_proj"):

@@ -1,7 +1,11 @@
-# Train one CaMI model and evaluate its best checkpoint over repeated trials
+# Train one model like train.py, then evaluate its best checkpoint over repeated trials
 
-This follows `robomimic/scripts/run_trained_agent_multi_eval.py`: train **one**
-model, then evaluate its best checkpoint several times. A *rollout* is one
+`train_trials` is `train.py` with trials added. It takes `train.py`'s options
+(`--config`, `--algo`, `--dataset`, `--name`, `--debug`, `--resume`, `--wandb`,
+`--wandb-project`, `--quiet`) and the bundled CaMI v3 variants of
+`train_cami_v3.py` (`--variant`), trains **one** model with `train.py`, and then
+evaluates its best checkpoint several times, following
+`robomimic/scripts/run_trained_agent_multi_eval.py`. A *rollout* is one
 episode. A *trial* is one evaluation of `--rollouts-per-trial` rollouts.
 
 Use the same environment and Hisham's robosuite fork that already run your
@@ -16,20 +20,37 @@ From the robomimic repository root:
 ```bash
 wandb login
 python -m robomimic.scripts.train_trials \
-  --config robomimic/exps/templates/bc_cami_square.json \
-  --dataset dataset/square_image_84_with_force.hdf5 \
+  --variant faithful \
+  --dataset dataset/square_image_84_contactnets_state.hdf5 \
+  --name square_cami_v3_faithful \
   --n-trials 10 \
   --rollouts-per-trial 50 \
-  --epochs 2000 \
-  --group square-cami-c \
-  --wandb-project cami
+  --wandb-project cami-square-v3 \
+  --quiet
 ```
 
-1. **Train one model** with the template's `train.seed` (1), or `--seed N`. The
-   Square template defines an epoch as 500 gradient steps, so this is 2,000
-   epochs of 500 steps. It evaluates 50 episodes every 50 epochs and at the
-   final epoch, and keeps best-success checkpoints. The template's periodic
-   checkpoints and rolling `last.pth`/`last_bak.pth` remain available.
+Give exactly one source for the training config, as with `train.py` and
+`train_cami_v3.py`:
+
+| Option | Config used |
+|---|---|
+| `--config FILE` | A full template such as `robomimic/exps/templates/bc_cami_square.json` |
+| `--variant NAME` | A bundled CaMI v3 variant (`faithful`, `baseline_faithful`, `prediction`, ...) |
+| `--algo NAME` | The defaults of an algorithm, for example `--algo bc` with `--dataset` |
+
+Epochs, seed, rollout count and rate, and everything else come from that config.
+`--epochs`, `--seed`, `--rollouts` and `--rollout-rate` override it. `--name` (also
+spelled `--group`) names the experiment and its output folder; it defaults to a
+timestamp. `--quiet` is passed to `train.py`. Weights & Biases is used only when
+you ask for it, as in `train.py`: `--wandb`, `--wandb-project`, or an explicit
+`--wandb-mode online|offline`.
+
+1. **Train one model** with `train.py`, using the config's `train.seed` or `--seed N`
+   and its epoch count. The Square templates define an epoch as 500 gradient
+   steps, so 2,000 epochs is 1,000,000 steps. It evaluates 50 episodes every 50
+   epochs and at the final epoch, and keeps best-success checkpoints. The
+   template's periodic checkpoints and rolling `last.pth`/`last_bak.pth` remain
+   available.
 2. **Choose the checkpoint once.** It is the one with the highest recorded
    training-evaluation success rate; ties prefer the earlier epoch. Every trial
    evaluates these same weights, and the launcher stops if a trial reports any
@@ -88,7 +109,7 @@ control step(s) at 60 fps = 3x real time`. Rendering every step instead of every
 fifth takes noticeably longer per trial.
 
 Videos are settings of the experiment: a group that was started with other video
-options cannot be resumed with these (use a new `--group`).
+options cannot be resumed with these (use a new `--name`).
 
 ## Evaluate a model you already have
 
@@ -100,13 +121,13 @@ either the checkpoint file or its run folder:
 python -m robomimic.scripts.train_trials \
   --checkpoint trained_models/<group>/trials/trial_02_seed_2/<timestamp>/models/model_epoch_1000_<dataset>_success_0.9.pth \
   --n-trials 10 --rollouts-per-trial 50 \
-  --group square-cami-trial2-best \
+  --name square-cami-trial2-best \
   --wandb-project cami
 
 # Or let the launcher pick the best-success checkpoint of a run
 python -m robomimic.scripts.train_trials \
   --run-dir trained_models/<group>/trials/trial_02_seed_2 \
-  --n-trials 10 --group square-cami-trial2-best --wandb-project cami
+  --n-trials 10 --name square-cami-trial2-best --wandb-project cami
 ```
 
 `--run-dir` takes an experiment folder (its latest timestamped run), a timestamped
@@ -114,10 +135,9 @@ run, or a `models` folder. It chooses the highest recorded training success rate
 ties preferring the earlier epoch. List a run's candidates with
 `ls <run>/models | grep success`.
 
-Nothing is trained, so `--config`, `--dataset`, `--epochs`, `--seed`,
-`--rollouts`, and `--rollout-rate` are rejected, and `--wandb-project` is
-required unless you pass `--wandb-mode disabled` (there is no template to take
-it from). Everything else works as above: the same seed blocks and outputs,
+Nothing is trained, so `--config`, `--variant`, `--algo`, `--dataset`, `--epochs`,
+`--seed`, `--rollouts`, and `--rollout-rate` are rejected, and W&B needs
+`--wandb-project` when it is on (there is no template to take it from). Everything else works as above: the same seed blocks and outputs,
 `--resume`, `--aggregate-only`, `--keep-failures`, `--no-stitch`,
 `--camera-names`, `--video-skip`, and `--fps`. `--horizon N` overrides the horizon stored in the checkpoint
 (400 for Square, 700 for Tool Hang) for the trials only. The W&B group gets just
@@ -247,7 +267,7 @@ If the training run or a trial fails, fix the cause and rerun the same command
 with `--resume`. Finished work is kept, so completed trials are not run again.
 Running the command a second time without `--resume` stops with a message,
 because its group folder already exists: add `--resume` to continue it, or use
-another `--group` (or delete the folder) to start over. Resuming needs the same
+another `--name` (or delete the folder) to start over. Resuming needs the same
 options as the first attempt, so a changed `--n-trials` or `--run-dir` is refused.
 If a trial fails again, the child's traceback is printed just above the
 "Stopped at" line. An interrupted training run with a
@@ -256,14 +276,14 @@ not restore the complete RNG state of an uninterrupted run), and the same W&B
 training run continues, as does the evaluation run. A trial that failed is evaluated again into a new
 folder, so earlier files are preserved. The saved plan must match the resumed
 command. A manifest from the earlier ten-seed launcher is rejected; use a new
-`--group`.
+`--name`.
 
 To regenerate or upload the results of a completed group without running
 anything:
 
 ```bash
 python -m robomimic.scripts.train_trials \
-  --group square-cami-c \
+  --name square-cami-c \
   --aggregate-only \
   --wandb-project cami
 ```
@@ -275,27 +295,37 @@ A quick check of the actual dataset and simulation pipeline:
 
 ```bash
 python -m robomimic.scripts.train_trials \
-  --config robomimic/exps/templates/bc_cami_square.json \
-  --dataset dataset/square_image_84_with_force.hdf5 \
-  --n-trials 2 --debug --group cami-smoke --wandb-project cami
+  --variant faithful \
+  --dataset dataset/square_image_84_contactnets_state.hdf5 \
+  --n-trials 2 --debug --name cami-smoke
 ```
 
 Debug uses two epochs, three gradient steps per epoch, and two short rollouts in
-each trial. Use a new group for the full experiment. For offline logging, add
-`--wandb-mode offline`, then use the usual `wandb sync` on the saved W&B folders.
-For local-only checks, add `--wandb-mode disabled`.
+each trial. Use a new name for the full experiment. W&B is off unless you add
+`--wandb-project NAME` (or `--wandb`). For offline logging, add `--wandb-mode
+offline`, then use the usual `wandb sync` on the saved W&B folders.
 
 ## More seeds and the BC-RNN baseline
 
-Run the launcher again with another `--seed` and a new `--group` to add a
-training seed. Each group is a separate model, and the CSV files can be
+Run the launcher again with another `--seed` and a new `--name` to add a
+training seed. Each experiment is a separate model, and the CSV files can be
 concatenated.
 
-For a baseline, run the plain BC-RNN config through the same launcher with the
+For a baseline, run the matching config through the same launcher with the
 same `--eval-seed`. Both policies then start every rollout from the same seeds.
-No Square `bc` template is included. Copy `bc_cami_square.json`, set `algo_name`
-to `bc`, remove the `cami` block and the extra optimizers, and set
-`train.dataset_keys` to `["actions"]`, as `tests/test_rollout_best.py` does.
+For the CaMI v3 `faithful` variant the matching baseline is `baseline_faithful`,
+whose config differs from it only in `algo.cami.enabled` and the dataset keys
+(see `cami_v3.md`); for the other v3 variants use their `baseline*` twin. For the
+force-based Square config, copy `bc_cami_square.json`, set `algo_name` to `bc`,
+remove the `cami` block and the extra optimizers, and set `train.dataset_keys` to
+`["actions"]`, as `tests/test_rollout_best.py` does.
+
+To see every setting in which two trained models differ, compare their
+checkpoints:
+
+```bash
+python -m robomimic.scripts.compare_checkpoint_configs A.pth B.pth --trust-checkpoints
+```
 
 ## Validation
 

@@ -1,15 +1,25 @@
-"""Train one model, then evaluate its best checkpoint over repeated trials.
+"""Train one model exactly as train.py does, then evaluate its best checkpoint over repeated trials.
 
-Run from the repository root, using the same Python environment as train.py:
-    python -m robomimic.scripts.train_trials --config CONFIG --dataset DATASET \
-        --n-trials 10 --epochs 2000 --group square-cami-c --wandb-project cami
+Takes train.py's options (--config, --algo, --dataset, --name, --debug, --resume, --wandb,
+--wandb-project, --quiet) and the bundled CaMI v3 variants of train_cami_v3.py (--variant),
+and adds the trials. Run from the repository root, in the environment of train.py:
+    python -m robomimic.scripts.train_trials --variant faithful \
+        --dataset dataset/square_image_84_contactnets_state.hdf5 --name square_cami_v3_faithful \
+        --n-trials 10 --wandb-project cami-square-v3 --quiet
+    python -m robomimic.scripts.train_trials --config CONFIG --dataset DATASET --name NAME --n-trials 10
+    python -m robomimic.scripts.train_trials --algo bc --dataset DATASET --name NAME --n-trials 10
+
+The config comes from exactly one of --config (a full template), --variant or --algo (the
+algorithm's defaults, as with train.py). Epochs, seed and rollout settings come from it unless
+you override them with --epochs, --seed, --rollouts, --rollout-rate. Weights & Biases is used only
+when you ask for it (--wandb, --wandb-project or --wandb-mode), as with train.py.
 
 Or skip training and evaluate a model you already have, either one checkpoint
 or the best-success checkpoint of an existing run:
     python -m robomimic.scripts.train_trials --checkpoint PATH/model_epoch_1000_..._success_0.9.pth \
-        --n-trials 10 --group square-cami-c-best --wandb-project cami
+        --n-trials 10 --name square-cami-c-best --wandb-project cami
     python -m robomimic.scripts.train_trials --run-dir PATH/to/run \
-        --n-trials 10 --group square-cami-c-best --wandb-project cami
+        --n-trials 10 --name square-cami-c-best --wandb-project cami
 
 This follows run_trained_agent_multi_eval.py: one trained model (a single
 training seed), whose best checkpoint is evaluated --n-trials times with
@@ -36,6 +46,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from robomimic.scripts.generate_cami_v3_configs import VARIANT_CONFIGS
 from robomimic.utils.trial_metrics import (
     ROLLOUT_FIELDS, TRIAL_FIELDS, describe, describe_checkpoint, read_history, rollout_rows,
     select_checkpoint, summarize, trial_rows)
@@ -60,17 +71,62 @@ def write_csv(path, fieldnames, rows):
         writer.writerows(rows)
 
 
+REQUIRED_SETTINGS = (("algo_name",), ("train", "data"), ("train", "seed"), ("train", "num_epochs"),
+                     ("experiment", "rollout"), ("experiment", "save"), ("experiment", "logging"))
+
+
+def load_config(args):
+    """The training config as a dictionary, from --config, --variant or --algo (the choices train.py has).
+
+    --config and --variant files are used as written, so a template keeps the identity it had when an
+    earlier experiment was planned from it. --algo starts from the algorithm's defaults, as in train.py.
+    """
+    sources = [name for name in ("config", "variant", "algo") if getattr(args, name, None)]
+    if len(sources) != 1:
+        raise ValueError("Give exactly one of --config, --variant or --algo to train a model "
+                         "(or --checkpoint / --run-dir to evaluate one)")
+    if sources[0] == "config":
+        config = json.loads(Path(args.config).expanduser().read_text(encoding="utf-8"))
+    elif sources[0] == "variant":
+        path = REPO_ROOT / "robomimic/exps/templates" / VARIANT_CONFIGS[args.variant]
+        config = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        from robomimic.config import config_factory
+        config = json.loads(config_factory(args.algo).dump())
+    for path in REQUIRED_SETTINGS:
+        node = config
+        for key in path:
+            node = node.get(key, KeyError) if isinstance(node, dict) else KeyError
+        if node is KeyError:
+            raise ValueError("The config has no {}. Use a full template (such as a bundled variant) or "
+                             "--algo for the algorithm's defaults".format(".".join(path)))
+    return config
+
+
+def resolve_wandb_mode(args):
+    """Weights & Biases is opt-in, like train.py: --wandb, --wandb-project or an explicit --wandb-mode."""
+    mode = getattr(args, "wandb_mode", None)
+    if mode is not None:
+        return mode
+    if getattr(args, "wandb", False) or getattr(args, "wandb_project", None):
+        return os.environ.get("WANDB_MODE") or "online"
+    return "disabled"
+
+
 def make_plan(args):
     if args.checkpoint or args.run_dir:
         return make_evaluation_plan(args)
-    config = json.loads(Path(args.config).expanduser().read_text(encoding="utf-8"))
+    config = load_config(args)
     if args.dataset:
         dataset = str(Path(args.dataset).expanduser().resolve(strict=True))
         config["train"]["data"] = [{"path": dataset}]
     data = config["train"]["data"]
+    if not data:
+        raise ValueError("The config names no dataset. Pass --dataset")
     if not isinstance(data, str) and len(data) != 1:
         raise ValueError("Automatic best-checkpoint evaluation requires a single-dataset checkpoint")
     experiment = config["experiment"]
+    epochs = args.epochs if args.epochs is not None else config["train"]["num_epochs"]
     if experiment.get("additional_envs"):
         raise ValueError("Use a single evaluation environment for automatic best-checkpoint evaluation")
     if experiment.get("ckpt_path"):
@@ -86,12 +142,12 @@ def make_plan(args):
     if args.rollout_rate is not None:
         experiment["rollout"]["rate"] = args.rollout_rate
     if args.debug:
-        args.epochs = 2
+        epochs = 2
         args.rollouts_per_trial = 2
         experiment["epoch_every_n_steps"] = 3
         experiment["validation_epoch_every_n_steps"] = 3
         experiment["rollout"].update(n=2, rate=1, horizon=10, warmstart=0)
-    if experiment["rollout"].get("warmstart", 0) >= args.epochs:
+    if experiment["rollout"].get("warmstart", 0) >= epochs:
         raise ValueError("rollout.warmstart must be below the number of epochs")
     for key in ("n", "rate", "horizon"):
         if not isinstance(experiment["rollout"][key], int) or experiment["rollout"][key] < 1:
@@ -99,7 +155,7 @@ def make_plan(args):
     seed = config["train"]["seed"] if args.seed is None else args.seed
     if not isinstance(seed, int) or seed < 0 or seed >= 2 ** 32:
         raise ValueError("The training seed must be an integer in [0, 2**32)")
-    settings = {"config": config, "epochs": args.epochs, "seed": seed,
+    settings = {"config": config, "epochs": epochs, "seed": seed,
                 "n_trials": args.n_trials, "rollouts_per_trial": args.rollouts_per_trial,
                 "eval_seed": args.eval_seed, "camera_names": args.camera_names,
                 "video_skip": args.video_skip, "fps": args.fps or 20 / args.video_skip,
@@ -256,7 +312,9 @@ def train_model(manifest, group_dir, args):
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config["experiment"]["logging"]["log_wandb"] = args.wandb_mode != "disabled"
     write_json(config_path, config)
-    command = [sys.executable, "-m", "robomimic.scripts.train", "--config", training["config"], "--quiet"]
+    command = [sys.executable, "-m", "robomimic.scripts.train", "--config", training["config"]]
+    if getattr(args, "quiet", False):
+        command.append("--quiet")
     experiment_dir = group_dir / "training" / training["name"]
     if experiment_dir.exists():
         run_dir = training_directory(experiment_dir)
@@ -560,6 +618,7 @@ def publish_report(report, manifest, result_dir, args, tracker=None):
 
 
 def run(args):
+    args.wandb_mode = resolve_wandb_mode(args)
     args.group = args.group or datetime.now().strftime("cami_%Y%m%d_%H%M%S_%f")
     if Path(args.group).name != args.group or args.group in (".", ".."):
         raise ValueError("Group must be a folder name without path separators")
@@ -589,12 +648,15 @@ def run(args):
     return report
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", help="Training JSON template; required to train a model")
+    parser.add_argument("--config", help="Full training config JSON, as for train.py")
+    parser.add_argument("--variant", choices=sorted(VARIANT_CONFIGS),
+                        help="Bundled CaMI v3 config, as for train_cami_v3.py")
+    parser.add_argument("--algo", help="Algorithm whose default config to train, as for train.py")
     parser.add_argument("--dataset", help="Override train.data with this local dataset")
-    parser.add_argument("--epochs", type=int, help="Training epochs (default 2000)")
-    parser.add_argument("--seed", type=int, help="Training seed (default: train.seed from the template)")
+    parser.add_argument("--epochs", type=int, help="Training epochs (default: train.num_epochs of the config)")
+    parser.add_argument("--seed", type=int, help="Training seed (default: train.seed of the config)")
     parser.add_argument("--checkpoint",
                         help="Skip training: evaluate this existing .pth checkpoint")
     parser.add_argument("--run-dir",
@@ -607,10 +669,11 @@ def main():
                         help="Trial t, rollout j (both counted from 0) uses seed eval-seed + t * rollouts-per-trial + j")
     parser.add_argument("--horizon", type=int,
                         help="Override the rollout horizon of the checkpoint in the evaluation trials")
-    parser.add_argument("--group", help="Unique experiment group; defaults to a timestamped name")
+    parser.add_argument("--name", "--group", dest="group",
+                        help="Name of the experiment (--group is the same option); defaults to a timestamped name")
     parser.add_argument("--output-dir", default=str(REPO_ROOT / "trained_models"))
-    parser.add_argument("--rollouts", type=int, help="Training evaluation episodes (default: template)")
-    parser.add_argument("--rollout-rate", type=int, help="Evaluate every N epochs (default: template), plus final epoch")
+    parser.add_argument("--rollouts", type=int, help="Training evaluation episodes (default: config)")
+    parser.add_argument("--rollout-rate", type=int, help="Evaluate every N epochs (default: config), plus final epoch")
     parser.add_argument("--metric-key", help="Dataset key for best success checkpoint selection")
     parser.add_argument("--camera-names", nargs="+", default=["agentview"])
     parser.add_argument("--video-skip", type=int, default=5)
@@ -623,29 +686,36 @@ def main():
     parser.add_argument("--no-stitch", action="store_true",
                         help="Keep only the individual videos: do not also join each trial's clips into "
                              "SUCCESSFUL_ALL.mp4 and FAILED_ALL.mp4")
-    parser.add_argument("--wandb-project")
+    parser.add_argument("--wandb", action="store_true",
+                        help="Track training and evaluation in Weights & Biases (authenticate with wandb login)")
+    parser.add_argument("--wandb-project", help="W&B project name; setting this also enables W&B")
     parser.add_argument("--wandb-entity")
-    parser.add_argument("--wandb-mode", choices=["online", "offline", "disabled"], default=os.environ.get("WANDB_MODE", "online"))
+    parser.add_argument("--wandb-mode", choices=["online", "offline", "disabled"],
+                        help="W&B mode (default: online when --wandb or --wandb-project is given, else disabled; "
+                             "WANDB_MODE sets the mode that --wandb picks)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Compact training output, as for train.py")
     parser.add_argument("--resume", action="store_true", help="Skip completed work and resume an incomplete training run")
     parser.add_argument("--aggregate-only", action="store_true", help="Rebuild/re-upload results for a completed group")
     parser.add_argument("--debug", action="store_true", help="Two epochs, three gradient steps/epoch, two short rollouts")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     evaluating = bool(args.checkpoint or args.run_dir)
     if args.checkpoint and args.run_dir:
         parser.error("--checkpoint and --run-dir are alternatives; give one")
     if evaluating:
-        training_only = [name for name in ("config", "dataset", "epochs", "seed", "rollouts", "rollout_rate")
-                         if getattr(args, name) is not None]
+        training_only = [name for name in ("config", "variant", "algo", "dataset", "epochs", "seed", "rollouts",
+                                           "rollout_rate") if getattr(args, name) is not None]
         if training_only:
             parser.error("cannot combine {} with --checkpoint/--run-dir: they only apply when "
                          "training a model".format(
                              ", ".join("--" + name.replace("_", "-") for name in training_only)))
-    elif args.epochs is None:
-        args.epochs = 2000
-    if not args.aggregate_only and not args.config and not evaluating:
-        parser.error("--config is required to train a model (or give --checkpoint / --run-dir to evaluate one)")
+    elif not args.aggregate_only:
+        sources = [name for name in ("config", "variant", "algo") if getattr(args, name)]
+        if len(sources) != 1:
+            parser.error("give exactly one of --config, --variant or --algo to train a model "
+                         "(or --checkpoint / --run-dir to evaluate one)")
     if (args.resume or args.aggregate_only) and not args.group:
-        parser.error("--group is required for --resume or --aggregate-only")
+        parser.error("--name (or --group) is required for --resume or --aggregate-only")
     for name in ("n_trials", "epochs", "rollouts_per_trial", "video_skip", "horizon"):
         if getattr(args, name) is not None and getattr(args, name) < 1:
             parser.error(name.replace("_", "-") + " must be positive")
@@ -653,7 +723,7 @@ def main():
         parser.error("Evaluation seeds must be in [0, 2**32)")
     if args.fps is not None and (not math.isfinite(args.fps) or args.fps <= 0):
         parser.error("fps must be finite and positive")
-    run(args)
+    return run(args)
 
 
 if __name__ == "__main__":

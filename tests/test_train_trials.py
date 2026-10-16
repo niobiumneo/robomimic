@@ -343,7 +343,7 @@ class LauncherTests(unittest.TestCase):
             train_trials.main()
         args = launcher.call_args.args[0]
         self.assertEqual((args.n_trials, args.rollouts_per_trial, args.epochs, args.seed, args.eval_seed),
-                         (10, 50, 2000, None, 10000))
+                         (10, 50, None, None, 10000))
         # The earlier ten-seed flags fail loudly rather than silently changing meaning.
         for flag in ("--seed-start", "--seeds", "--eval-rollouts"):
             with mock.patch.object(sys, "argv", ["train_trials", "--config", str(self.config), flag, "1"]), \
@@ -856,8 +856,8 @@ class LauncherTests(unittest.TestCase):
             with mock.patch.object(sys, "argv", ["train_trials", *bad]), \
                  contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 train_trials.main()
-        # Training still defaults to 2000 epochs.
-        self.assertEqual(parse("--config", str(self.config)).epochs, 2000)
+        # Training takes its epoch count from the config unless --epochs is given.
+        self.assertIsNone(parse("--config", str(self.config)).epochs)
 
     def test_command_line_video_options(self):
         def parse(*argv):
@@ -870,6 +870,110 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual((args.video_skip, args.fps, args.keep_failures, args.no_stitch), (5, None, False, False))
         args = parse("--video-skip", "1", "--fps", "60", "--keep-failures", "--no-stitch")
         self.assertEqual((args.video_skip, args.fps, args.keep_failures, args.no_stitch), (1, 60.0, True, True))
+
+    # ---- train.py-style options -----------------------------------------------------------------
+    def parse_cli(self, *argv):
+        with mock.patch.object(train_trials, "run") as launcher, mock.patch.object(sys, "argv", ["train_trials", *argv]):
+            train_trials.main()
+        return launcher.call_args.args[0]
+
+    def test_epochs_seed_and_rollouts_come_from_the_config_unless_overridden(self):
+        settings, _ = train_trials.make_plan(self.args(epochs=None))
+        self.assertEqual(settings["epochs"], 2000)
+        template = json.loads(self.config.read_text())
+        template["train"]["num_epochs"] = 345
+        self.config.write_text(json.dumps(template))
+        self.assertEqual(train_trials.make_plan(self.args(epochs=None))[0]["epochs"], 345)
+        self.assertEqual(train_trials.make_plan(self.args(epochs=12))[0]["epochs"], 12)
+        self.assertEqual(train_trials.make_plan(self.args(epochs=None, debug=True))[0]["epochs"], 2)
+
+    def test_every_bundled_variant_is_a_training_config(self):
+        from robomimic.scripts.generate_cami_v3_configs import VARIANT_CONFIGS
+        for variant, filename in VARIANT_CONFIGS.items():
+            with self.subTest(variant=variant):
+                settings, _ = train_trials.make_plan(self.args(config=None, variant=variant))
+                template = json.loads((train_trials.REPO_ROOT / "robomimic/exps/templates" / filename).read_text())
+                self.assertEqual(settings["config"]["algo_name"], "bc_cami_v3")
+                self.assertEqual(settings["config"]["algo"], template["algo"])
+                self.assertEqual(settings["config"]["train"]["data"], [{"path": str(self.dataset.resolve())}])
+                self.assertEqual(settings["epochs"], template["train"]["num_epochs"])
+                self.assertEqual(settings["seed"], template["train"]["seed"])
+
+    def test_algo_starts_from_the_algorithm_defaults_like_train_py(self):
+        from robomimic.config import config_factory
+        settings, _ = train_trials.make_plan(self.args(config=None, algo="bc"))
+        default = json.loads(config_factory("bc").dump())
+        self.assertEqual(settings["config"]["algo"], default["algo"])
+        self.assertEqual(settings["epochs"], default["train"]["num_epochs"])
+        self.assertEqual(settings["config"]["train"]["data"], [{"path": str(self.dataset.resolve())}])
+        with self.assertRaisesRegex(ValueError, "names no dataset"):
+            train_trials.make_plan(self.args(config=None, algo="bc", dataset=None))
+
+    def test_exactly_one_config_source_and_complete_configs(self):
+        for changes in (dict(config=None), dict(variant="faithful"), dict(algo="bc"),
+                        dict(config=None, variant="faithful", algo="bc")):
+            with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, "exactly one"):
+                train_trials.make_plan(self.args(**changes))
+        self.config.write_text(json.dumps({"algo_name": "bc", "train": {"seed": 1}}))
+        with self.assertRaisesRegex(ValueError, "no train.data|no train.num_epochs|no experiment"):
+            train_trials.make_plan(self.args())
+        for bad in (["--variant", "faithful", "--algo", "bc"], ["--config", str(self.config), "--algo", "bc"],
+                    ["--run-dir", "x", "--variant", "faithful"], ["--run-dir", "x", "--algo", "bc"], []):
+            with mock.patch.object(sys, "argv", ["train_trials", *bad]), contextlib.redirect_stderr(io.StringIO()), \
+                 self.assertRaises(SystemExit):
+                train_trials.main()
+
+    def test_command_line_accepts_train_py_options_and_name_is_the_group(self):
+        args = self.parse_cli("--variant", "faithful", "--dataset", str(self.dataset), "--name", "my-run",
+                              "--wandb-project", "proj", "--quiet", "--debug")
+        self.assertEqual((args.variant, args.group, args.wandb_project, args.quiet, args.debug, args.config, args.algo),
+                         ("faithful", "my-run", "proj", True, True, None, None))
+        self.assertEqual(self.parse_cli("--algo", "bc", "--group", "g").group, "g")
+        self.assertFalse(self.parse_cli("--config", str(self.config)).quiet)
+        self.assertEqual(self.parse_cli("--config", str(self.config), "--name", "again", "--resume").group, "again")
+        with mock.patch.object(sys, "argv", ["train_trials", "--config", str(self.config), "--resume"]), \
+             contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            train_trials.main()
+
+    def test_quiet_reaches_the_training_command_only_when_asked(self):
+        for quiet in (False, True):
+            self.calls.clear()
+            shutil.rmtree(self.group_dir, ignore_errors=True)
+            with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+                train_trials.run(self.args(n_trials=1, quiet=quiet))
+            self.assertEqual("--quiet" in self.commands("train")[0], quiet)
+
+    def test_weights_and_biases_is_opt_in_like_train_py(self):
+        cases = [({}, None, "disabled"), ({"wandb": True}, None, "online"), ({"wandb": True}, "offline", "offline"),
+                 ({"wandb_project": "p"}, None, "online"), ({"wandb_mode": "offline"}, "online", "offline"),
+                 ({"wandb": True, "wandb_mode": "disabled"}, None, "disabled")]
+        for changes, environment, expected in cases:
+            args = argparse.Namespace(wandb=False, wandb_project=None, wandb_mode=None)
+            args.__dict__.update(changes)
+            with self.subTest(changes=changes, environment=environment), \
+                 mock.patch.dict(os.environ, {"WANDB_MODE": environment} if environment else {}, clear=False):
+                if not environment:
+                    os.environ.pop("WANDB_MODE", None)
+                self.assertEqual(train_trials.resolve_wandb_mode(args), expected)
+        # Without any request nothing touches the SDK, and no project is needed.
+        sdk = types.SimpleNamespace(init=mock.Mock())
+        with mock.patch.dict(sys.modules, {"wandb": sdk}), \
+             mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(self.args(n_trials=2, wandb_mode=None, wandb_project=None, wandb=False))
+        sdk.init.assert_not_called()
+        self.assertEqual(self.calls[0][1]["WANDB_MODE"], "disabled")
+        training = json.loads((self.group_dir / "config.json").read_text())
+        self.assertFalse(training["experiment"]["logging"]["log_wandb"])
+
+    def test_training_is_a_train_py_subprocess_of_the_chosen_variant(self):
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
+            train_trials.run(self.args(config=None, variant="baseline_faithful", n_trials=1, epochs=None))
+        command = self.commands("train")[0]
+        saved = json.loads(Path(command[command.index("--config") + 1]).read_text())
+        self.assertEqual(saved["algo_name"], "bc_cami_v3")
+        self.assertFalse(saved["algo"]["cami"]["enabled"])
+        self.assertEqual(saved["train"]["num_epochs"], 2000)
+        self.assertEqual(saved["experiment"]["name"], "test-group-train")
 
 
 class MetricTests(unittest.TestCase):

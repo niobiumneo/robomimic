@@ -16,7 +16,38 @@ VARIANT_CONFIGS = {
     "warmup": "bc_cami_square_contactNetsv3.json",
     "prediction": "bc_cami_square_contactNetsv3_prediction.json",
     "prediction_full": "bc_cami_square_contactNetsv3_prediction_full.json",
+    "faithful": "bc_cami_square_contactNetsv3_faithful.json",
+    "baseline_faithful": "bc_rnn_square_v3_baseline_faithful.json",
 }
+
+
+def _faithful(config):
+    """Settings of the formulation report (October 2026) that the report leaves to the experiment.
+
+    The anchor is the first policy feature (offset 0), so the sequence holds the anchor and its
+    ten future actions. State loss weight is constant, with no prediction head. The report's
+    values are used for every number it gives: lambda_s 0.01, lambda_t 1, EMA momentum 0.995,
+    snippet horizon 10, Huber delta 0.1, contact temperature 0.05, gamma 1, MSE-only BC, the
+    example encoder sizes (1024-d policy feature, state projector 1024-128-128, one-layer
+    LSTM of 256 and a 256-128-128 trajectory head). Descriptor channels are averaged
+    (weights 1/3) so a pair that differs by x in every channel gets the weight of the report's
+    single-channel curve, not three times its distance. The remaining choices make the run an
+    exact twin of an ordinary BC-RNN run: every demonstration used, no validation split, and the
+    training sequence length is also the rollout hidden-state reset period.
+    """
+    train, cami, algo = config["train"], config["algo"]["cami"], config["algo"]
+    train.update(seq_length=cami["snippet_horizon"] + 1, batch_size=16, seed=0, hdf5_filter_key=None,
+                 hdf5_validation_filter_key=None)
+    config["experiment"]["validate"] = False
+    algo["rnn"]["horizon"] = train["seq_length"]
+    cami.update(state_loss_weight=.01, traj_loss_weight=1., momentum=.995, use_momentum_target=True,
+                snippet_horizon=10, temperature=.07, normalize_embeddings=True, contrastive_dim=128,
+                query_proj_layers=[128], key_proj_layers=[128], snippet_hidden_dim=256, snippet_num_layers=1)
+    cami["continuous"].update(feature_weights=[1. / 3] * 3, huber_delta=.1, contact_temperature=.05,
+                              gamma=1., distance_penalty="huber", objective="weighted")
+    cami["v3"].update(context_steps=0, warmup_epochs=0)
+    cami["v3"]["prediction"]["enabled"] = False
+    algo["loss"].update(l2_weight=1, l1_weight=0, cos_weight=0)
 
 
 def make_configs():
@@ -27,6 +58,9 @@ def make_configs():
     base["train"]["data"] = [{"path": "dataset/square_image_84_contactnets_state.hdf5"}]
     optim = base["algo"]["optim_params"]
     base["algo"]["optim_params"] = {"policy": deepcopy(optim["policy"]), "cami": deepcopy(optim["policy"])}
+    # v3 trains at a constant learning rate; the v2 template halves it at epoch 1000.
+    for name in ("policy", "cami"):
+        base["algo"]["optim_params"][name]["learning_rate"].update(decay_factor=.1, epoch_schedule=[])
     base["algo"]["cami"]["v3"] = {
         "context_steps": 5, "warmup_epochs": 100, "gradient_diagnostics_every": 100,
         "prediction": {"enabled": False, "features": ["gap"], "hidden_dims": [128],
@@ -46,6 +80,8 @@ def make_configs():
             train["batch_size"] = 64
         if variant == "history":
             cami["v3"]["warmup_epochs"] = 0
+        if variant.endswith("faithful"):
+            _faithful(config)
         if variant.startswith("baseline"):
             cami["enabled"] = False
             train["dataset_keys"] = ["actions"]

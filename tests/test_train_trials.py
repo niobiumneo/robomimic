@@ -1039,6 +1039,31 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(train_trials.make_plan(self.args(epochs=6))[0]["epochs"], 6)
         self.assertEqual(train_trials.make_plan(self.args(epochs=5, debug=True))[0]["epochs"], 2)
 
+    def test_a_child_ended_by_a_signal_gets_an_explanation(self):
+        def killed(command, cwd, env, check):
+            if command[2] == "robomimic.scripts.train":
+                raise subprocess.CalledProcessError(-9, command)
+            return self.child(command, cwd, env, check)
+        stderr = io.StringIO()
+        with mock.patch.object(train_trials.subprocess, "run", side_effect=killed), contextlib.redirect_stderr(stderr), \
+             self.assertRaises(subprocess.CalledProcessError):
+            train_trials.run(self.args(n_trials=1))
+        text = stderr.getvalue()
+        self.assertIn("Stopped at test-group-train", text)
+        self.assertIn("ended by SIGKILL (return code -9)", text)
+        self.assertIn("out-of-memory killer", text)
+        self.assertIn("--resume", text)
+        manifest = json.loads((self.group_dir / "manifest.json").read_text())
+        self.assertEqual(manifest["training"]["status"], "failed")
+
+    def test_only_signal_deaths_are_explained(self):
+        explain = train_trials.killed_by_signal
+        self.assertIn("SIGSEGV", explain(subprocess.CalledProcessError(-11, "x")))
+        self.assertNotIn("out-of-memory", explain(subprocess.CalledProcessError(-11, "x")))
+        self.assertIn("signal 99", explain(subprocess.CalledProcessError(-99, "x")))
+        self.assertIsNone(explain(subprocess.CalledProcessError(1, "x")))
+        self.assertIsNone(explain(ValueError("x")))
+
     def test_training_is_a_train_py_subprocess_of_the_chosen_variant(self):
         with mock.patch.object(train_trials.subprocess, "run", side_effect=self.child):
             train_trials.run(self.args(config=None, variant="baseline_faithful", n_trials=1, epochs=None))

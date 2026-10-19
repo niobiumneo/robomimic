@@ -42,6 +42,7 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
 import uuid
@@ -422,6 +423,27 @@ def evaluate_trial(entry, manifest, group_dir):
     write_json(manifest_path, manifest)
 
 
+def killed_by_signal(exc):
+    """A hint when a child process was ended by a signal rather than by an error of its own.
+
+    A negative return code means the operating system or someone ended the process, so it printed no
+    traceback of its own. SIGKILL during training or rollouts is usually the out-of-memory killer.
+    """
+    code = getattr(exc, "returncode", None)
+    if not isinstance(exc, subprocess.CalledProcessError) or not isinstance(code, int) or code >= 0:
+        return None
+    try:
+        name = signal.Signals(-code).name
+    except ValueError:
+        name = "signal {}".format(-code)
+    message = "The child process was ended by {} (return code {}), not by an error of its own.".format(name, code)
+    if name == "SIGKILL":
+        message += (" That is most often the operating system's out-of-memory killer, when too much host RAM is in use "
+                    "(several jobs at once, or the rollout phase of training). Check `dmesg -T | grep -i 'killed process'` "
+                    "and `free -h`, run fewer jobs at a time, then use --resume; at most the interrupted epoch is repeated.")
+    return message
+
+
 def describe_changes(old, new, limit=6):
     """The first few settings that differ between two plans, as 'path: old != new'."""
     def flat(value, prefix=""):
@@ -486,6 +508,9 @@ def launch(args, group_dir):
             write_json(manifest_path, manifest)
             print("Stopped at {}. Fix the error, then repeat this command with --resume.".format(
                 active["name"]), file=sys.stderr, flush=True)
+            hint = killed_by_signal(exc)
+            if hint:
+                print(hint, file=sys.stderr, flush=True)
         if tracker is not None:
             tracker.close(failed=True)
         raise

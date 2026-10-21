@@ -294,6 +294,8 @@ def episodes(path):
     its first action.
     """
     with h5py.File(path, "r") as f:
+        if "data" not in f:
+            raise ValueError("{} has no 'data' group, so it is not a robomimic dataset or rollouts file".format(path))
         names = sorted(f["data"], key=lambda x: int(x.split("_")[-1]))
         usable = [n for n in names if replayable(f["data"][n])]
         meta = json.loads(f["data"].attrs.get("cami_c", "{}"))
@@ -518,6 +520,9 @@ def main(argv=None):
                         help="Flags that keep an episode out of the mask (default: the jam flags; 'all' for every flag)")
     parser.add_argument("--quiet", action="store_true", help="Do not print progress")
     args = parser.parse_args(argv)
+    if not os.path.isfile(args.dataset):
+        parser.error("{} does not exist. A rollouts.hdf5 is written by rollout_best.py (or by train_trials.py for each "
+                     "trial); find existing ones with: find . -name rollouts.hdf5".format(args.dataset))
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
     for name in ("min_drag_steps", "min_post_contact_steps"):

@@ -318,6 +318,10 @@ python -m robomimic.scripts.inspect_square_insertions \
   --dataset square_rollouts/rollouts.hdf5 --csv rollout_insertions.csv
 ```
 
+`rollout_best.py --insertion-report` does both in one command, and with
+`--wandb-project` sends the success rate and the insertion numbers to W&B; see
+[Weights & Biases](cami_wandb.md).
+
 `train_trials.py` runs the same evaluation for every trial, so each attempt writes
 `<group>/evaluations/<trial>/<timestamp>/rollouts.hdf5` (a trial that was retried has
 one folder per attempt). A rollout stops at the action after which the task counts
@@ -326,7 +330,17 @@ as done, so the state that satisfies the success rule is stored only in
 replays a different success from the one the file records. The rule is evaluated on
 the restored poses after a forward pass, so it can fire one step before the state
 the rollout stopped at. Rollouts that failed before their first action have no
-states and are listed as skipped.
+states and are listed as skipped. A rollout also ends at its first success, so
+"seated at the last step" is not reported for it (the report says how many
+episodes this leaves out); judge rollouts by the post in the hole and the tilt at
+the success, which are measured at that step.
+
+Other kinds of rollouts do not work as well. The videos that `train.py` writes hold
+no simulator state, so they cannot be analyzed. A file written by
+`run_trained_agent.py --dataset_path` has `states` and `model_file`, but only the
+state before each action, with no `next_states` and no `success` attribute: the
+state that satisfies the success rule is missing, so its successes can read as
+never succeeded. Evaluate those checkpoints again with `rollout_best.py`.
 
 For every episode it restores each recorded state and reads the poses and contacts
 there, then prints how many successes have the post really inside the hole, the

@@ -203,6 +203,8 @@ def analyze(f, geometry, max_tilt_deg=30., seat_tolerance=.005, drag_speed=.001,
     success = near & (far_enough | np.isnan(eef).any(axis=1))
     first = int(np.argmax(success)) if success.any() else None
     at = first if first is not None else T - 1
+    # A rollout stops at its first success, so its last step says nothing about whether the nut stayed seated.
+    ends_at_success = first is not None and first == T - 1
     seated_flags = np.array([post_through_hole(pos[t], rot[t], peg[:2], geometry["peg_half"], geometry["hole_half"])
                              for t in range(T)])
     seated = seated_flags & (tilt <= max_tilt_deg) & (pos[:, 2] - z_rest <= seat_tolerance)
@@ -230,7 +232,7 @@ def analyze(f, geometry, max_tilt_deg=30., seat_tolerance=.005, drag_speed=.001,
         enter = int(np.argmax(inside_outline)) if inside_outline.any() else None
     margin = (float(pos[enter, 2] - geometry["half_thickness"] - geometry["peg_top"]) if enter is not None else float("nan"))
     return dict(
-        steps=T, success=first is not None, first_success=first, seated_at_end=bool(seated[-1]),
+        steps=T, success=first is not None, first_success=first, seated_at_end=None if ends_at_success else bool(seated[-1]),
         success_without_hole=bool(first is not None and not seated_flags[first]),
         tilted_at_success=bool(first is not None and tilt[first] > max_tilt_deg),
         tilt_deg=float(tilt[at]), height_above_rest=float(pos[at, 2] - z_rest),
@@ -357,13 +359,14 @@ def summarize(report):
     values = lambda key: np.array([m[key] for m in eps.values()], dtype=float)
     frac = lambda mask: float(np.mean(mask)) if n else float("nan")
     has = lambda flag: np.array([flag in m["flags"] for m in eps.values()])
+    seated = [m["seated_at_end"] for m in eps.values() if m["seated_at_end"] is not None]
     success = values("success").astype(bool)
     no_hole = values("success_without_hole").astype(bool)
     tilted = values("tilted_at_success").astype(bool)
     summary = dict(
         episodes=n, successes=int(success.sum()), success_with_post_in_hole=int((success & ~no_hole).sum()),
         success_without_post_in_hole=int(no_hole.sum()), tilted_at_success=int(tilted.sum()),
-        seated_at_end=int(values("seated_at_end").astype(bool).sum()), never_succeeded=int((~success).sum()),
+        seated_at_end=sum(seated), seated_checked=len(seated), never_succeeded=int((~success).sum()),
         median_height_above_rest_at_success=float(np.median(values("height_above_rest")[success])) if success.any() else float("nan"),
         long_post_contact=frac(has("long_contact_with_post")), median_post_contact_steps=float(np.median(values("nut_peg_steps"))),
         median_peak_post_force=float(np.median(values("peak_post_force"))),
@@ -391,9 +394,37 @@ def summarize(report):
                                                            float(np.median(over[~flagged])) if (~flagged).any() else float("nan"))
         for key in ("nut_peg_steps", "drag_after_lift_steps", "tilt_deg", "peak_post_force"):
             summary["drift_vs_" + key] = spearman(over, [eps[k][key] for k in report["drift"]])
+    jammed = sum(1 for v in summary["flagged"].values() if set(v) & set(JAM_FLAGS))
+    summary["jam_flag_episodes"] = jammed
+    summary["jam_flag_share"] = jammed / n if n else float("nan")
     summary["skipped"] = list(report.get("skipped", []))
     summary["thresholds"] = dict(report.get("thresholds", {}))
     return summary
+
+
+LOGGED = ("episodes", "successes", "success_with_post_in_hole", "success_without_post_in_hole", "tilted_at_success", "seated_at_end",
+          "seated_checked", "never_succeeded", "jam_flag_episodes", "jam_flag_share", "dragged_after_lift", "arrived_beside_post", "long_post_contact",
+          "grasped", "finger_table_before_grasp", "finger_table", "hand_table", "arm_table", "lifted_over_3cm", "median_lift",
+          "median_tilt_at_success", "median_height_above_rest_at_success", "median_post_contact_steps",
+          "median_finger_table_before_grasp_steps", "recorded_vs_replayed_success_mismatch")
+TABLE_COLUMNS = ("episode", "success", "post_through_hole", "tilt_deg", "height_above_rest", "lift", "grasp_step", "drag_after_lift_steps",
+                 "nut_peg_steps", "finger_table_before_grasp_steps", "flags")
+
+
+def logged_values(summary, prefix="Insertion/"):
+    """The numbers of a summary for an experiment tracker, under ``prefix``; values that do not exist are left out."""
+    values = {}
+    for key in LOGGED:
+        value = summary.get(key)
+        if isinstance(value, (bool, int, float, np.generic)) and math.isfinite(float(value)):
+            values[prefix + key] = float(value)
+    return values
+
+
+def table_rows(report):
+    """One row per episode, in ``TABLE_COLUMNS``, for a tracker's table."""
+    return [[name if column == "episode" else ";".join(m["flags"]) if column == "flags" else m[column]
+             for column in TABLE_COLUMNS] for name, m in report["episodes"].items()]
 
 
 def number(value, spec, scale=1.):
@@ -410,7 +441,10 @@ def print_summary(summary):
     p("At the first success: median nut height above flat-on-the-table {} cm, median tilt {} deg, tilted past the limit in {} "
       "episodes. Nut flat and seated at the last step: {} of {}".format(
           number(summary["median_height_above_rest_at_success"], ".1f", 100), number(summary["median_tilt_at_success"], ".1f"),
-          summary["tilted_at_success"], summary["seated_at_end"], n))
+          summary["tilted_at_success"], summary["seated_at_end"], summary["seated_checked"]))
+    if summary["seated_checked"] < n:
+        p("  ({} episodes end at their first success, as a rollout does, so their last step says nothing about the nut staying "
+          "seated; judge those by the post in the hole and the tilt at the success)".format(n - summary["seated_checked"]))
     if "recorded_vs_replayed_success_mismatch" in summary:
         p("Success recorded in the file differs from the replayed rule in {} episodes".format(
             summary["recorded_vs_replayed_success_mismatch"]))
@@ -445,8 +479,7 @@ def print_summary(summary):
     for reason in FLAG_NAMES:
         names = [k for k, v in flagged.items() if reason in v]
         p("  {:<28} {:>4}  {}".format(reason, len(names), ", ".join(names[:12]) + (" ..." if len(names) > 12 else "")))
-    jammed = [k for k, v in flagged.items() if set(v) & set(JAM_FLAGS)]
-    p("  raising a jam flag ({}): {} of {}".format(", ".join(JAM_FLAGS), len(jammed), n))
+    p("  raising a jam flag ({}): {} of {}".format(", ".join(JAM_FLAGS), summary["jam_flag_episodes"], n))
     if summary.get("skipped"):
         p("\nSkipped, with no replayable states: {} ({}{})".format(
             len(summary["skipped"]), ", ".join(summary["skipped"][:12]), " ..." if len(summary["skipped"]) > 12 else ""))

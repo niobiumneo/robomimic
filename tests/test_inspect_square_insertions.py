@@ -449,7 +449,7 @@ def test_report_over_a_dataset_flags_the_jammed_episode_only(tmp_path, replay):
     summary = insertions.summarize(report)
     assert summary["episodes"] == 4 and summary["successes"] == 3 and summary["never_succeeded"] == 1
     assert summary["success_with_post_in_hole"] == 2 and summary["success_without_post_in_hole"] == 1
-    assert summary["tilted_at_success"] == 1 and summary["seated_at_end"] == 1
+    assert summary["tilted_at_success"] == 1 and summary["seated_at_end"] == 1 and summary["seated_checked"] == 4
     assert summary["recorded_vs_replayed_success_mismatch"] == 0
     assert summary["dragged_after_lift"] == pytest.approx(.25) and summary["dragged_at_any_time"] == pytest.approx(.25)
     assert summary["long_post_contact"] == pytest.approx(.25) and summary["arrived_beside_post"] == pytest.approx(.25)
@@ -491,10 +491,34 @@ def test_the_state_after_the_last_action_is_replayed_when_next_states_records_it
     write_dataset(path, [states, states, states], recorded=[True, True, True], later=[following, None, rows[2:first + 2]])
     episodes = insertions.build_report(str(path))["episodes"]
     assert episodes["demo_0"]["success"] and episodes["demo_0"]["first_success"] == first and episodes["demo_0"]["steps"] == first + 1
+    # a rollout ends at its first success, so its last step cannot say whether the nut stays seated
+    assert episodes["demo_0"]["seated_at_end"] is None and episodes["demo_1"]["seated_at_end"] is False
     assert not episodes["demo_1"]["success"] and episodes["demo_1"]["steps"] == first  # no next_states to add
     assert not episodes["demo_2"]["success"] and episodes["demo_2"]["steps"] == first   # not the same trajectory: not trusted
     summary = insertions.summarize(insertions.build_report(str(path)))
     assert summary["recorded_vs_replayed_success_mismatch"] == 2
+    assert (summary["seated_at_end"], summary["seated_checked"]) == (0, 2)  # only the two that did not end at a success count
+
+
+def test_a_report_of_rollouts_says_that_their_last_step_was_not_judged(tmp_path, replay, capsys):
+    rows = clean_episode()
+    first = analyze(rows)["first_success"]
+    path = tmp_path / "rollouts.hdf5"
+    write_dataset(path, [rows[:first], rows], later=[rows[1:first + 1], None])
+    report = insertions.build_report(str(path))
+    summary = insertions.summarize(report)
+    assert (summary["seated_at_end"], summary["seated_checked"]) == (1, 1)
+    insertions.print_summary(summary)
+    text = capsys.readouterr().out
+    assert "Nut flat and seated at the last step: 1 of 1" in text
+    assert "1 episodes end at their first success, as a rollout does" in text
+    csv_path = tmp_path / "out.csv"
+    insertions.write_csv(str(csv_path), report)
+    rows_out = list(__import__("csv").DictReader(csv_path.open()))
+    assert rows_out[0]["seated_at_end"] == "" and rows_out[1]["seated_at_end"] == "True"
+    # the numbers sent to a tracker leave out nothing that exists and add nothing that does not
+    values = insertions.logged_values(summary)
+    assert values["Insertion/seated_checked"] == 1 and values["Insertion/jam_flag_share"] == 0
 
 
 def test_rollouts_without_states_are_listed_as_skipped_and_never_judged(tmp_path, replay, capsys):

@@ -7,6 +7,7 @@ excluded with an explicit n; they are never replaced by zero or interpolated.
 """
 import json
 import math
+import os
 import re
 import statistics
 from collections import defaultdict
@@ -69,6 +70,19 @@ def read_history(path):
     if not history:
         raise ValueError("No completed epochs in {}".format(path))
     return history
+
+
+def resolve_wandb_mode(args):
+    """The W&B mode that was asked for on the command line, or None when nothing was asked for.
+
+    Weights & Biases is opt-in, like train.py: --wandb, --wandb-project or an explicit --wandb-mode.
+    """
+    mode = getattr(args, "wandb_mode", None)
+    if mode is not None:
+        return mode
+    if getattr(args, "wandb", False) or getattr(args, "wandb_project", None):
+        return os.environ.get("WANDB_MODE") or "online"
+    return None
 
 
 def describe(values):

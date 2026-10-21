@@ -51,7 +51,7 @@ from pathlib import Path
 
 from robomimic.scripts.generate_cami_v3_configs import VARIANT_CONFIGS
 from robomimic.utils.trial_metrics import (
-    ROLLOUT_FIELDS, TRIAL_FIELDS, describe, describe_checkpoint, read_history, rollout_rows,
+    ROLLOUT_FIELDS, TRIAL_FIELDS, describe, describe_checkpoint, read_history, resolve_wandb_mode, rollout_rows,
     select_checkpoint, summarize, trial_rows)
 
 
@@ -130,20 +130,6 @@ def load_config(args):
         from robomimic.config import config_factory
         config = json.loads(config_factory(args.algo).dump())
     return fill_launcher_settings(config)
-
-
-def resolve_wandb_mode(args):
-    """The W&B mode that was asked for on the command line, or None when nothing was asked for.
-
-    Weights & Biases is opt-in, like train.py: --wandb, --wandb-project or an explicit --wandb-mode. A config
-    whose experiment.logging.log_wandb is true also asks for it (see make_plan), as it does in train.py.
-    """
-    mode = getattr(args, "wandb_mode", None)
-    if mode is not None:
-        return mode
-    if getattr(args, "wandb", False) or getattr(args, "wandb_project", None):
-        return os.environ.get("WANDB_MODE") or "online"
-    return None
 
 
 def make_plan(args):

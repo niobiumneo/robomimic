@@ -389,6 +389,18 @@ def test_flags_change_exactly_at_their_thresholds():
     assert flags(dict(base, tilted_at_success=True)) == ["tilted_at_success"]
 
 
+def test_a_missing_or_foreign_file_is_named_in_one_line(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        insertions.main(["--dataset", str(tmp_path / "square_rollouts" / "rollouts.hdf5"), "--quiet"])
+    err = capsys.readouterr().err
+    assert "does not exist" in err and "rollout_best.py" in err and "Traceback" not in err
+    other = tmp_path / "other.hdf5"
+    with h5py.File(other, "w") as f:
+        f["something"] = np.zeros(3)
+    with pytest.raises(ValueError, match="no 'data' group"):
+        insertions.main(["--dataset", str(other), "--quiet"])
+
+
 def test_episodes_need_states_and_a_model_file(tmp_path):
     path = tmp_path / "plain.hdf5"
     with h5py.File(path, "w") as f:

@@ -318,8 +318,9 @@ python -m robomimic.scripts.inspect_square_insertions \
   --dataset square_rollouts/rollouts.hdf5 --csv rollout_insertions.csv
 ```
 
-`rollout_best.py --insertion-report` does both in one command, and with
-`--wandb-project` sends the success rate and the insertion numbers to W&B; see
+`rollout_best.py --insertion-report` does both in one command; with `--n-trials` it
+averages the insertion numbers over trials, and with `--wandb-project` it sends the
+success rate, each trial's average, the insertion numbers and the videos to W&B; see
 [Weights & Biases](cami_wandb.md).
 
 `train_trials.py` runs the same evaluation for every trial, so each attempt writes

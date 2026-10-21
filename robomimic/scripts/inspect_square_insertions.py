@@ -415,6 +415,8 @@ def logged_values(summary, prefix="Insertion/"):
     """The numbers of a summary for an experiment tracker, under ``prefix``; values that do not exist are left out."""
     values = {}
     for key in LOGGED:
+        if key == "seated_at_end" and not summary.get("seated_checked"):
+            continue  # no episode was checked, so there is no number (0 would claim none stayed seated)
         value = summary.get(key)
         if isinstance(value, (bool, int, float, np.generic)) and math.isfinite(float(value)):
             values[prefix + key] = float(value)

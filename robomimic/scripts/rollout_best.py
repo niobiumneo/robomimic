@@ -10,13 +10,19 @@ the performance of the weights in that file, so it must not rank last.pth.
 
 Every successful rollout gets its own video (--keep-failures adds the failed
 ones), and the clips of each outcome are also joined, in rollout order, into
-SUCCESSFUL_ALL.mp4 and FAILED_ALL.mp4 with a CSV saying which rollout plays when.
+SUCCESSFUL_ALL.mp4 and FAILED_ALL.mp4 with a CSV saying which rollout plays when
+(--no-stitch skips the joined copies; each rollout keeps its own video).
 rollouts.csv has one row per rollout and summary.json the totals, with a 95%
 confidence interval on the success rate.
 
+--n-trials N repeats the evaluation N times with disjoint seed ranges (trial k
+starts at --seed + (k-1) * --n-rollouts, as train_trials.py does) and reports each
+trial's average and the average over the trials, with a trial_NN folder per trial.
+
 Weights & Biases is opt-in (--wandb, --wandb-project or --wandb-mode), as in
-train.py. The run gets every rollout as it finishes, then the summary, a table of
-the rollouts, the joined videos and an artifact with the result files. A W&B
+train.py. The run gets every rollout as it finishes (its numbers and, unless
+--wandb-videos says otherwise, its video), then the summary, a table of the
+rollouts, the joined videos and an artifact with the result files. A W&B
 failure prints one warning and never stops the evaluation. For the Square task,
 --insertion-report also replays the saved rollouts and reports how the nut ended
 up on the post (see inspect_square_insertions), and logs that too:
@@ -35,6 +41,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import h5py
 import imageio.v2 as imageio
@@ -52,7 +59,8 @@ from robomimic.utils.trial_metrics import describe, resolve_wandb_mode, seed_env
 COMPILATIONS = (("SUCCESSFUL_ALL", ("successful",)), ("FAILED_ALL", ("failed", "errors")))
 INDEX_FIELDS = ("clip", "rollout", "seed", "status", "file", "start_seconds", "duration_seconds")
 ROLLOUT_FIELDS = ("rollout", "seed", "status", "success", "return", "horizon", "seconds", "error", "video")
-WANDB_VIDEOS = ("joined", "all", "none")
+WANDB_VIDEOS = ("all", "joined", "none")
+DEFAULT_WANDB_VIDEOS = "all"
 
 
 def wilson_interval(successes, n, z=1.959964):
@@ -88,34 +96,80 @@ def metric_keys(records):
                    if key in ("Return", "Horizon", "Success_Rate", "time") or key.endswith("_Success_Rate")})
 
 
-def summary_values(records):
-    """What the finished evaluation adds to a tracker's summary: counts, mean/SD/SE of each metric, a CI on success."""
-    successes = sum(1 for record in records if record["status"] == "successful")
-    errors = sum(1 for record in records if record["status"] == "errors")
-    values = {"Summary/n_rollouts": len(records), "Summary/num_success": successes, "Summary/num_errors": errors,
-              "Summary/Simulator_Error_Rate": errors / len(records) if records else None}
-    for key in metric_keys(records):
-        for stat, value in describe([record.get(key) for record in records]).items():
-            if value is not None:
-                values["Summary/{}/{}".format(key, stat)] = value
-    low, high = wilson_interval(successes, len(records))
-    if low is not None:
-        values["Summary/Success_Rate/ci95_low"], values["Summary/Success_Rate/ci95_high"] = low, high
+def metric_name(key):
+    return "Seconds" if key == "time" else key
+
+
+def trial_metrics(records, insertion=None):
+    """The numbers of one trial: each metric averaged over its rollouts, plus the insertion numbers if there are any."""
+    values = {metric_name(key): describe([record.get(key) for record in records])["mean"] for key in metric_keys(records)}
+    values["Simulator_Error_Rate"] = sum(record["status"] == "errors" for record in records) / len(records)
+    values["num_success"] = sum(record["status"] == "successful" for record in records)
+    values["num_errors"] = sum(record["status"] == "errors" for record in records)
+    if insertion is not None:
+        from robomimic.scripts import inspect_square_insertions as insertions
+        values.update(insertions.logged_values(insertion[1], prefix="Insertion/"))
     return {key: value for key, value in values.items() if value is not None}
 
 
-def print_results(summary, records, output, wandb_url=None):
-    """The numbers of the evaluation, as they are also saved in summary.json and sent to W&B."""
+def across_trials(rows):
+    """Mean, sample SD, SE and n of each metric over the trials (one row of ``trial_metrics`` each)."""
+    return {name: describe([row.get(name) for row in rows]) for name in sorted({name for row in rows for name in row})}
+
+
+def trial_values(trial, rows):
+    """What the finished trial (the last of ``rows``) adds to W&B: its numbers, and their mean and SE over the trials so far."""
+    values = {"trial": trial}
+    for name, value in rows[-1].items():
+        stats = describe([row.get(name) for row in rows])
+        values["Trial/" + name] = value
+        values["Running/{}/mean".format(name)] = stats["mean"]
+        if stats["se"] is not None:
+            values["Running/{}/se".format(name)] = stats["se"]
+    return values
+
+
+def summary_fields(rows, records):
+    """What the finished evaluation adds to a tracker's summary.
+
+    Summary/<metric>/... is over the trials (n = number of trials); Pooled/... is over every rollout of every trial,
+    with a 95% interval on the success rate.
+    """
+    successes = sum(record["status"] == "successful" for record in records)
+    errors = sum(record["status"] == "errors" for record in records)
+    values = {"Summary/n_trials": len(rows), "Pooled/n_rollouts": len(records), "Pooled/num_success": successes,
+              "Pooled/num_errors": errors}
+    for name, stats in across_trials(rows).items():
+        for stat, value in stats.items():
+            if value is not None:
+                values["Summary/{}/{}".format(name, stat)] = value
+    for key in metric_keys(records):
+        for stat, value in describe([record.get(key) for record in records]).items():
+            if value is not None:
+                values["Pooled/{}/{}".format(metric_name(key), stat)] = value
+    low, high = wilson_interval(successes, len(records))
+    if low is not None:
+        values["Pooled/Success_Rate/ci95_low"], values["Pooled/Success_Rate/ci95_high"] = low, high
+    return values
+
+
+def format_count(value):
+    """A number for the printout: three significant digits, but never an exponent for a count in the thousands."""
+    return "{:,.0f}".format(value) if abs(value) >= 1000 else "{:.3g}".format(value)
+
+
+def print_results(summary, records, output, wandb_url=None, title="Results"):
+    """The numbers of one trial, as they are also saved in its summary.json and sent to W&B."""
     n, successes = len(records), summary["num_success"]
     low, high = wilson_interval(successes, n)
-    print("\nResults over {} rollouts".format(n), flush=True)
+    print("\n{} over {} rollouts".format(title, n), flush=True)
     print("  success rate {:.1%} ({}/{}), 95% CI {:.1%} to {:.1%}; simulator errors {}".format(
         summary["success_rate"], successes, n, low, high, summary["num_errors"]), flush=True)
     for key, label in (("Return", "return"), ("Horizon", "steps"), ("time", "seconds")):
         stats = describe([record.get(key) for record in records])
         if stats["mean"] is not None:
-            print("  {} per rollout: mean {:.3g}{}".format(label, stats["mean"], "" if stats["std"] is None else
-                                                          ", SD {:.3g}".format(stats["std"])), flush=True)
+            print("  {} per rollout: mean {}{}".format(label, format_count(stats["mean"]), "" if stats["std"] is None else
+                                                      ", SD {}".format(format_count(stats["std"]))), flush=True)
     print("  saved in {}: summary.json, rollouts.csv, rollouts.hdf5{}".format(
         output, "".join(", " + name for name in ("insertions.csv", "insertions.json") if (output / name).exists())),
           flush=True)
@@ -123,17 +177,38 @@ def print_results(summary, records, output, wandb_url=None):
         print("  W&B: {}".format(wandb_url), flush=True)
 
 
-class WandbTracker:
-    """The W&B run that follows an evaluation.
+def print_trials(trials, rows, records, url=None):
+    """One line per trial and the average over the trials."""
+    print("\nTrials: {} x {} rollouts".format(len(trials), len(trials[0]["records"])), flush=True)
+    print("  trial  first seed  success rate  successes   return   steps  errors", flush=True)
+    for trial, row in zip(trials, rows):
+        print("  {:>5}  {:>10}  {:>12.1%}  {:>9}  {:>7}  {:>6}  {:>6}".format(
+            trial["number"], trial["seed"], row["Success_Rate"], "{}/{}".format(row["num_success"], len(trial["records"])),
+            format_count(row["Return"]), format_count(row["Horizon"]), row["num_errors"]), flush=True)
+    stats = across_trials(rows)
+    rate = stats["Success_Rate"]
+    print("  average of the trial success rates: {:.1%}{}  (n = {} trials)".format(
+        rate["mean"], "" if rate["se"] is None else " +/- {:.1%} (standard error)".format(rate["se"]), rate["n"]), flush=True)
+    successes = sum(record["status"] == "successful" for record in records)
+    low, high = wilson_interval(successes, len(records))
+    print("  all {} rollouts together: {}/{} = {:.1%}, 95% CI {:.1%} to {:.1%}".format(
+        len(records), successes, len(records), successes / len(records), low, high), flush=True)
+    if url:
+        print("  W&B: {}".format(url), flush=True)
 
-    It opens before the first rollout, gets each rollout as it finishes (with the running success rate and its
-    standard error), and at the end the summary, a table of the rollouts, the joined videos and the result files.
-    Tracking is a convenience and must never cost an evaluation: if W&B fails, one warning is printed and the
-    evaluation carries on without it.
+
+class WandbTracker:
+    """The W&B run that follows an evaluation of one or several trials.
+
+    It opens before the first rollout and gets each rollout as it finishes (its numbers and, with --wandb-videos all,
+    its video), each trial as it finishes (its numbers and their mean and standard error over the trials so far),
+    and at the end the summary, the tables, the result files and the insertion report. Tracking is a convenience
+    and must never cost an evaluation: if W&B fails, one warning is printed and the evaluation carries on without it.
     """
 
-    def __init__(self, mode, project, entity, group, name, directory, config):
+    def __init__(self, mode, project, entity, group, name, directory, config, videos=DEFAULT_WANDB_VIDEOS):
         self.run, self.wandb, self.mode, self.project = None, None, mode, project
+        self.output, self.videos = Path(directory), videos
         try:
             import wandb
             from robomimic import macros as Macros
@@ -145,13 +220,20 @@ class WandbTracker:
                                   mode=mode, dir=str(directory), config=config)
             self.run.define_metric("rollout")
             self.run.define_metric("Rollout/*", step_metric="rollout")
-            self.run.define_metric("Running/*", step_metric="rollout")
+            self.run.define_metric("trial")
+            self.run.define_metric("Trial/*", step_metric="trial")
+            self.run.define_metric("Running/*", step_metric="trial")
+            if mode == "offline":
+                print("W&B is offline: nothing is sent until you run: wandb sync {}".format(
+                    self.output / "wandb" / "latest-run"), flush=True)
         except Exception as exc:
             self.give_up(exc)
 
     @property
     def url(self):
-        return None if self.run is None else (getattr(self.run, "url", None) or getattr(self.run, "id", None))
+        if self.run is None or self.mode == "offline":
+            return None
+        return getattr(self.run, "url", None) or getattr(self.run, "id", None)
 
     def info(self):
         if self.run is None:
@@ -164,57 +246,69 @@ class WandbTracker:
               "output directory.".format(type(exc).__name__, exc), flush=True)
         self.close()
 
-    def log_rollout(self, record, records):
+    def log_rollout(self, record, records, number, trial):
+        """One finished rollout: ``number`` counts the rollouts of all trials, ``records`` are those so far."""
         if self.run is None:
             return
         try:
-            values = {"rollout": record["rollout"], "Rollout/Success": float(bool(record["Success_Rate"])),
+            values = {"rollout": number, "Rollout/Trial": trial, "Rollout/Success": float(bool(record["Success_Rate"])),
                       "Rollout/Return": record["Return"], "Rollout/Horizon": record["Horizon"],
                       "Rollout/Seconds": record["time"], "Rollout/Simulator_Error": float(record["status"] == "errors")}
             for key in metric_keys([record]):
                 if key.endswith("_Success_Rate") and key != "Success_Rate":
                     values["Rollout/" + key] = record[key]
+            if self.videos == "all" and record["video"]:
+                values["Rollout/Video"] = self.wandb.Video(
+                    str(self.output / record["video"]), format="mp4",
+                    caption="trial {} rollout {} | {} | seed {}".format(trial, record["rollout"], record["status"], record["seed"]))
             stats = describe([r["Success_Rate"] for r in records])
-            values["Running/Success_Rate/mean"] = stats["mean"]
+            values["Rollout/Running/Success_Rate/mean"] = stats["mean"]
             if stats["se"] is not None:
-                values["Running/Success_Rate/se"] = stats["se"]
+                values["Rollout/Running/Success_Rate/se"] = stats["se"]
             self.run.log(values)
         except Exception as exc:
             self.give_up(exc)
 
-    def publish(self, summary, records, output, videos="joined", insertion=None):
-        """Add the results of the finished evaluation: summary, table, videos, files and the insertion report."""
+    def log_trial(self, trial, rows, folder, summary, n_trials):
+        """One finished trial: its numbers with the running mean/SE over the trials, and its joined videos."""
+        if self.run is None:
+            return
+        try:
+            self.run.log(trial_values(trial, rows))
+            if self.videos != "none":
+                for name, details in summary.get("compilations", {}).items():
+                    key = "Video/" + name if n_trials == 1 else "Video/trial_{:02d}/{}".format(trial, name)
+                    self.run.log({key: self.wandb.Video(str(folder / details["video"]), format="mp4")})
+                if not summary.get("compilations") and summary.get("num_videos"):
+                    print("No joined videos to send to W&B (--no-stitch or the join failed){}.".format(
+                        "" if self.videos == "all" else "; use --wandb-videos all to send each clip"), flush=True)
+        except Exception as exc:
+            self.give_up(exc)
+
+    def publish(self, trials, rows, records, output):
+        """Add the results of the finished evaluation: summary fields, tables and the result files."""
         if self.run is None:
             return
         try:
             wandb, run = self.wandb, self.run
-            run.summary.update(summary_values(records))
-            columns = [field for field in ROLLOUT_FIELDS if field != "video" or videos == "all"]
-            rows = []
-            for record in records:
-                row = rollout_row(record)
-                if videos == "all" and record["video"]:
-                    row["video"] = wandb.Video(str(output / record["video"]), format="mp4")
-                elif videos == "all":
-                    row["video"] = None
-                rows.append([row[field] for field in columns])
-            run.log({"rollouts": wandb.Table(columns=columns, data=rows)})
-            if videos != "none":
-                for name, details in summary.get("compilations", {}).items():
-                    run.log({"Video/" + name: wandb.Video(str(output / details["video"]), format="mp4")})
-                if videos == "joined" and not summary.get("compilations") and any(record["video"] for record in records):
-                    print("No joined videos to send to W&B (--no-stitch); add --wandb-videos all to send each clip.", flush=True)
-            if insertion is not None:
+            run.summary.update(summary_fields(rows, records))
+            names = sorted({name for row in rows for name in row})
+            run.log({"trials": wandb.Table(columns=["trial", "seed", "num_rollouts"] + names, data=[
+                [trial["number"], trial["seed"], len(trial["records"])] + [row.get(name) for name in names]
+                for trial, row in zip(trials, rows)])})
+            run.log({"rollouts": wandb.Table(columns=["trial"] + list(ROLLOUT_FIELDS), data=[
+                [trial["number"]] + [rollout_row(record)[field] for field in ROLLOUT_FIELDS]
+                for trial in trials for record in trial["records"]])})
+            reports = [(trial["number"], trial["insertion"]) for trial in trials if trial["insertion"] is not None]
+            if reports:
                 from robomimic.scripts import inspect_square_insertions as insertions
-                report, report_summary = insertion
-                run.summary.update(insertions.logged_values(report_summary))
-                run.log({"insertions": wandb.Table(columns=list(insertions.TABLE_COLUMNS), data=insertions.table_rows(report))})
+                run.log({"insertions": wandb.Table(columns=["trial"] + list(insertions.TABLE_COLUMNS), data=[
+                    [number] + row for number, (report, _) in reports for row in insertions.table_rows(report)])})
             artifact = wandb.Artifact("rollouts-" + str(run.id), type="rollouts")
-            names = ["summary.json", "rollouts.csv", "insertions.csv", "insertions.json"]
-            names += [details["index"] for details in summary.get("compilations", {}).values()]
-            for name in names:
-                if (output / name).exists():
-                    artifact.add_file(str(output / name))
+            for path in sorted(output.rglob("*")):
+                relative = path.relative_to(output)
+                if path.is_file() and path.suffix in (".csv", ".json") and "wandb" not in relative.parts:
+                    artifact.add_file(str(path), name=str(relative))
             run.log_artifact(artifact)
         except Exception as exc:
             self.give_up(exc)
@@ -236,7 +330,10 @@ class NoTracker:
     def info(self):
         return None
 
-    def log_rollout(self, record, records):
+    def log_rollout(self, *args, **kwargs):
+        pass
+
+    def log_trial(self, *args, **kwargs):
         pass
 
     def publish(self, *args, **kwargs):
@@ -421,11 +518,125 @@ def playback_speed(args, ckpt):
     return args.fps * args.video_skip / control_freq, control_freq
 
 
+def evaluate_trial(ctx, folder, number, first_seed, offset):
+    """One trial: ``--n-rollouts`` rollouts of the checkpoint with seeds first_seed, first_seed + 1, ...
+
+    Writes the trial's rollouts.hdf5, videos, rollouts.csv and summary.json (and the insertion report if asked) into
+    ``folder``. ``offset`` is the number of rollouts of the earlier trials, so W&B can order all rollouts.
+    """
+    args, tracker = ctx.args, ctx.tracker
+    records = []
+    masks = {"successful": [], "failed": [], "errors": []}
+    summary = {"checkpoint": str(ctx.checkpoint), "selection": ctx.selection, "wandb": tracker.info(),
+               "n_rollouts_requested": args.n_rollouts, "horizon": ctx.horizon,
+               "seed": first_seed, "camera_names": args.camera_names,
+               "video_skip": args.video_skip, "fps": args.fps, "compilations": {},
+               "episodes": records}
+    with h5py.File(folder / "rollouts.hdf5", "x") as dataset:
+        data = dataset.create_group("data")
+        data.attrs["env_args"] = json.dumps(ctx.env.serialize())
+        data.attrs["checkpoint"] = str(ctx.checkpoint)
+        data.attrs["total"] = 0
+        for index in range(args.n_rollouts):
+            seed = first_seed + index
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+            seed_environment(ctx.env, seed)
+            started = time.time()
+            stats, trajectory, initial, frames = collect_episode(
+                ctx.policy, ctx.env, ctx.horizon, args.camera_names, args.video_skip,
+                terminate_on_success=ctx.terminate_on_success)
+            stats["time"] = time.time() - started
+            name = "demo_{}".format(index)
+            save_trajectory(data, name, trajectory, initial, stats, seed)
+            data.attrs.modify("total", int(data.attrs["total"]) + stats["Horizon"])
+            status = "errors" if stats["error"] else (
+                "successful" if stats["Success_Rate"] else "failed")
+            masks[status].append(name)
+            video = None
+            if frames and (stats["Success_Rate"] or args.keep_failures):
+                video = "{}_rollout_{:03d}_seed_{}.mp4".format(status, index, seed)
+                # Encode after classification: unsuccessful frames need not
+                # create temporary videos that would then require deleting.
+                write_video(folder / video, frames, args.fps)
+            records.append(dict(stats, rollout=index, seed=seed, status=status,
+                                trajectory=name, video=video,
+                                video_frames=len(frames) if video else 0))
+            dataset.flush()
+            ctx.records.append(records[-1])
+            tracker.log_rollout(records[-1], ctx.records, offset + index, number)
+            summary.update(n_rollouts_completed=len(records),
+                           num_success=len(masks["successful"]),
+                           num_errors=len(masks["errors"]),
+                           success_rate=len(masks["successful"]) / len(records))
+            summary["metrics"] = {key: describe([record.get(key) for record in records])["mean"]
+                                  for key in metric_keys(records)}
+            summary["metrics"]["Simulator_Error_Rate"] = len(masks["errors"]) / len(records)
+            write_summary(folder, summary)
+            print("Rollout {}/{} | {} | steps={} | success so far={:.1%}".format(
+                index + 1, args.n_rollouts, status, stats["Horizon"],
+                summary["success_rate"]), flush=True)
+            del frames
+        for key, names in masks.items():
+            dataset.create_dataset("mask/" + key, data=np.asarray(names, dtype="S"))
+    print("Success: {}/{} ({:.1%}); simulator errors: {}".format(
+        summary["num_success"], len(records), summary["success_rate"],
+        summary["num_errors"]), flush=True)
+    if not args.no_stitch:
+        try:
+            summary["compilations"] = stitch_videos(folder, records, args.fps)
+        except Exception as exc:
+            # The individual videos are already safe; the evaluation itself must not fail over this.
+            print("Could not join the videos ({}: {}). The individual videos are unaffected.".format(
+                type(exc).__name__, exc), flush=True)
+        write_summary(folder, summary)
+        for name, details in summary["compilations"].items():
+            print("{}: {} clips, {:.1f} s at {:g} fps -> {}".format(
+                name, details["clips"], details["seconds"], args.fps, folder / details["video"]), flush=True)
+    if not args.keep_failures and (masks["failed"] or masks["errors"]):
+        print("{} unsuccessful rollouts have no video; add --keep-failures to save them{}.".format(
+            len(masks["failed"]) + len(masks["errors"]),
+            "" if args.no_stitch else " (and join them into FAILED_ALL.mp4)"), flush=True)
+    write_rollout_table(folder, records)
+    insertion = insertion_report(folder) if ctx.insertion else None
+    summary["success_rate_ci95"] = list(wilson_interval(summary["num_success"], len(records)))
+    summary["num_videos"] = sum(1 for record in records if record["video"])
+    write_summary(folder, summary)
+    return {"number": number, "seed": first_seed, "folder": folder, "summary": summary, "records": records,
+            "insertion": insertion}
+
+
+def write_trial_files(output, trials, rows, ctx, aggregate):
+    """The files that cover every trial: trial_results.csv and rollout_results.csv (the columns of
+    run_trained_agent_multi_eval.py, as train_trials.py writes them), trials.csv with every number, summary.json."""
+    from robomimic.utils.trial_metrics import ROLLOUT_FIELDS as ALL_ROLLOUT_FIELDS, TRIAL_FIELDS, rollout_rows, trial_rows
+    model = getattr(ctx.args, "name", None) or output.name
+    entries = [{"index": trial["number"], "seed": trial["seed"],
+                "evaluation": {"checkpoint": str(ctx.checkpoint), "episodes": trial["records"]}} for trial in trials]
+    for name, fields, table in (("trial_results.csv", TRIAL_FIELDS, trial_rows(model, ctx.env_name, entries)),
+                                ("rollout_results.csv", ALL_ROLLOUT_FIELDS, rollout_rows(model, ctx.env_name, entries))):
+        with (output / name).open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(fields))
+            writer.writeheader()
+            writer.writerows(table)
+    names = sorted({name for row in rows for name in row})
+    with (output / "trials.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["trial", "seed", "num_rollouts"] + names)
+        for trial, row in zip(trials, rows):
+            writer.writerow([trial["number"], trial["seed"], len(trial["records"])] + [row.get(name) for name in names])
+    (output / "summary.json").write_text(json.dumps(aggregate, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+
+
 def run(args):
     """Restore the policy once and run a fixed, reproducible rollout budget.
 
-    One call is one evaluation trial: --n-rollouts episodes of one checkpoint.
-    The train_trials launcher repeats it with disjoint seed ranges.
+    One trial is --n-rollouts episodes of one checkpoint; --n-trials repeats it with disjoint seed ranges, as the
+    train_trials launcher does, and averages the trials. A single trial writes its files directly into the output
+    directory; several write one trial_NN folder each plus files that cover them all.
     """
     selection = None
     if args.checkpoint:
@@ -441,12 +652,17 @@ def run(args):
         raise ValueError("Rollout horizon must be a positive integer")
     if isinstance(ckpt["env_metadata"], list):
         raise ValueError("This helper requires a single-environment checkpoint")
+    n_trials = getattr(args, "n_trials", 1)
+    if n_trials < 1:
+        raise ValueError("n-trials must be positive")
     wandb_mode = resolve_wandb_mode(args)
     use_wandb = wandb_mode is not None and wandb_mode != "disabled"
-    project = None
+    project, project_source = None, None
     if use_wandb:
-        project = getattr(args, "wandb_project", None) or getattr(
-            getattr(config.experiment, "logging", None), "wandb_proj_name", None)
+        project, project_source = getattr(args, "wandb_project", None), "--wandb-project"
+        if not project:
+            project = getattr(getattr(config.experiment, "logging", None), "wandb_proj_name", None)
+            project_source = "the checkpoint's config"
         if not project:
             raise ValueError("Set --wandb-project (or --wandb-mode disabled) to send the results to W&B")
     insertion_requested = bool(getattr(args, "insertion_report", False))
@@ -462,6 +678,11 @@ def run(args):
         print("Training evaluation success: {:.1%} | epoch {}".format(
             selection["training_success_rate"], selection["epoch"]), flush=True)
     print("Device: {} | output: {}".format(device, output), flush=True)
+    if n_trials > 1:
+        print("{} trials of {} rollouts, seeds {} to {}".format(
+            n_trials, args.n_rollouts, args.seed, args.seed + n_trials * args.n_rollouts - 1), flush=True)
+    if use_wandb:
+        print("W&B: project {} (from {}), mode {}".format(project, project_source, wandb_mode), flush=True)
     speed, control_freq = playback_speed(args, ckpt)
     print("Videos: every {} control step(s) at {:g} fps{}".format(
         args.video_skip, args.fps,
@@ -474,113 +695,63 @@ def run(args):
     torch.manual_seed(args.seed)
     env, _ = FileUtils.env_from_checkpoint(ckpt_dict=ckpt, render=False,
                                           render_offscreen=True, verbose=False)
-    records = []
-    masks = {"successful": [], "failed": [], "errors": []}
+    wandb_videos = getattr(args, "wandb_videos", DEFAULT_WANDB_VIDEOS)
     tracker = NoTracker()
     if use_wandb:
         tracker = WandbTracker(
             wandb_mode, project, getattr(args, "wandb_entity", None), getattr(args, "group", None),
             getattr(args, "name", None) or output.name, output,
             {"checkpoint": str(checkpoint), "epoch": (selection or {}).get("epoch"),
-             "training_success_rate": (selection or {}).get("training_success_rate"), "n_rollouts": args.n_rollouts,
-             "horizon": horizon, "seed": args.seed, "camera_names": args.camera_names, "video_skip": args.video_skip,
-             "fps": args.fps, "keep_failures": bool(args.keep_failures), "output_dir": str(output),
-             "insertion_report": insertion_requested, "wandb_videos": getattr(args, "wandb_videos", "joined")})
-    summary = {"checkpoint": str(checkpoint), "selection": selection, "wandb": tracker.info(),
-               "n_rollouts_requested": args.n_rollouts, "horizon": horizon,
-               "seed": args.seed, "camera_names": args.camera_names,
-               "video_skip": args.video_skip, "fps": args.fps, "compilations": {},
-               "episodes": records}
-    completed = False
+             "training_success_rate": (selection or {}).get("training_success_rate"), "n_trials": n_trials,
+             "n_rollouts": args.n_rollouts, "horizon": horizon, "seed": args.seed, "camera_names": args.camera_names,
+             "video_skip": args.video_skip, "fps": args.fps, "keep_failures": bool(args.keep_failures),
+             "output_dir": str(output), "insertion_report": insertion_requested, "wandb_videos": wandb_videos},
+            videos=wandb_videos)
+    ctx = SimpleNamespace(args=args, policy=policy, env=env, horizon=horizon, checkpoint=checkpoint, selection=selection,
+                          tracker=tracker, insertion=insertion_requested, env_name=env_name or "unknown", records=[],
+                          terminate_on_success=getattr(config.experiment.rollout, "terminate_on_success", True))
+    trials, rows = [], []
+    finished = False
     try:
-        with h5py.File(output / "rollouts.hdf5", "x") as dataset:
-            data = dataset.create_group("data")
-            data.attrs["env_args"] = json.dumps(env.serialize())
-            data.attrs["checkpoint"] = str(checkpoint)
-            data.attrs["total"] = 0
-            for index in range(args.n_rollouts):
-                seed = args.seed + index
-                random.seed(seed)
-                np.random.seed(seed)
-                torch.manual_seed(seed)
-                if torch.cuda.is_available():
-                    torch.cuda.manual_seed_all(seed)
-                seed_environment(env, seed)
-                started = time.time()
-                stats, trajectory, initial, frames = collect_episode(
-                    policy, env, horizon, args.camera_names, args.video_skip,
-                    terminate_on_success=getattr(config.experiment.rollout, "terminate_on_success", True))
-                stats["time"] = time.time() - started
-                name = "demo_{}".format(index)
-                save_trajectory(data, name, trajectory, initial, stats, seed)
-                data.attrs.modify("total", int(data.attrs["total"]) + stats["Horizon"])
-                status = "errors" if stats["error"] else (
-                    "successful" if stats["Success_Rate"] else "failed")
-                masks[status].append(name)
-                video = None
-                if frames and (stats["Success_Rate"] or args.keep_failures):
-                    video = "{}_rollout_{:03d}_seed_{}.mp4".format(status, index, seed)
-                    # Encode after classification: unsuccessful frames need not
-                    # create temporary videos that would then require deleting.
-                    write_video(output / video, frames, args.fps)
-                records.append(dict(stats, rollout=index, seed=seed, status=status,
-                                    trajectory=name, video=video,
-                                    video_frames=len(frames) if video else 0))
-                dataset.flush()
-                tracker.log_rollout(records[-1], records)
-                summary.update(n_rollouts_completed=len(records),
-                               num_success=len(masks["successful"]),
-                               num_errors=len(masks["errors"]),
-                               success_rate=len(masks["successful"]) / len(records))
-                metric_keys = {key for record in records for key in record
-                               if key in ("Return", "Horizon", "Success_Rate", "time")
-                               or key.endswith("_Success_Rate")}
-                summary["metrics"] = {key: describe([record.get(key) for record in records])["mean"]
-                                      for key in sorted(metric_keys)}
-                summary["metrics"]["Simulator_Error_Rate"] = len(masks["errors"]) / len(records)
-                write_summary(output, summary)
-                print("Rollout {}/{} | {} | steps={} | success so far={:.1%}".format(
-                    index + 1, args.n_rollouts, status, stats["Horizon"],
-                    summary["success_rate"]), flush=True)
-                del frames
-            for key, names in masks.items():
-                dataset.create_dataset("mask/" + key, data=np.asarray(names, dtype="S"))
-        completed = True
-    finally:
-        if not completed:
-            tracker.close(failed=True)
-        # EnvBase has no close method; robosuite's wrapped simulator does.
-        base = getattr(env, "unwrapped", env)
-        simulator = getattr(base, "env", base)
-        close = getattr(simulator, "close", None)
-        if callable(close):
-            close()
-    print("Success: {}/{} ({:.1%}); simulator errors: {}".format(
-        summary["num_success"], len(records), summary["success_rate"],
-        summary["num_errors"]), flush=True)
-    if not args.no_stitch:
         try:
-            summary["compilations"] = stitch_videos(output, records, args.fps)
-        except Exception as exc:
-            # The individual videos are already safe; the evaluation itself must not fail over this.
-            print("Could not join the videos ({}: {}). The individual videos are unaffected.".format(
-                type(exc).__name__, exc), flush=True)
-        write_summary(output, summary)
-        for name, details in summary["compilations"].items():
-            print("{}: {} clips, {:.1f} s at {:g} fps -> {}".format(
-                name, details["clips"], details["seconds"], args.fps, output / details["video"]), flush=True)
-    if not args.keep_failures and (masks["failed"] or masks["errors"]):
-        print("{} unsuccessful rollouts have no video; add --keep-failures to save them{}.".format(
-            len(masks["failed"]) + len(masks["errors"]),
-            "" if args.no_stitch else " (and join them into FAILED_ALL.mp4)"), flush=True)
-    write_rollout_table(output, records)
-    insertion = insertion_report(output) if insertion_requested else None
-    summary["success_rate_ci95"] = list(wilson_interval(summary["num_success"], len(records)))
-    write_summary(output, summary)
-    tracker.publish(summary, records, output, videos=getattr(args, "wandb_videos", "joined"), insertion=insertion)
-    print_results(summary, records, output, tracker.url)
-    tracker.close()
-    print("Videos, all trajectories, and summary saved in {}".format(output), flush=True)
+            for index in range(n_trials):
+                folder = output if n_trials == 1 else output / "trial_{:02d}".format(index + 1)
+                if n_trials > 1:
+                    folder.mkdir()
+                    print("\nTrial {}/{} | seeds {} to {}".format(
+                        index + 1, n_trials, args.seed + index * args.n_rollouts,
+                        args.seed + (index + 1) * args.n_rollouts - 1), flush=True)
+                trial = evaluate_trial(ctx, folder, index + 1, args.seed + index * args.n_rollouts, index * args.n_rollouts)
+                trials.append(trial)
+                rows.append(trial_metrics(trial["records"], trial["insertion"]))
+                tracker.log_trial(index + 1, rows, folder, trial["summary"], n_trials)
+                print_results(trial["summary"], trial["records"], folder, tracker.url if n_trials == 1 else None,
+                              "Results" if n_trials == 1 else "Trial {}".format(index + 1))
+        finally:
+            # EnvBase has no close method; robosuite's wrapped simulator does.
+            base = getattr(env, "unwrapped", env)
+            simulator = getattr(base, "env", base)
+            close = getattr(simulator, "close", None)
+            if callable(close):
+                close()
+        summary = trials[0]["summary"]
+        if n_trials > 1:
+            successes = sum(record["status"] == "successful" for record in ctx.records)
+            summary = {"checkpoint": str(checkpoint), "selection": selection, "wandb": tracker.info(), "n_trials": n_trials,
+                       "rollouts_per_trial": args.n_rollouts, "seed": args.seed, "horizon": horizon,
+                       "trials": [{"trial": trial["number"], "seed": trial["seed"], "folder": trial["folder"].name,
+                                   "metrics": row} for trial, row in zip(trials, rows)],
+                       "across_trials": across_trials(rows),
+                       "pooled": {"n_rollouts": len(ctx.records), "num_success": successes,
+                                  "success_rate": successes / len(ctx.records),
+                                  "success_rate_ci95": list(wilson_interval(successes, len(ctx.records)))}}
+            write_trial_files(output, trials, rows, ctx, summary)
+            print_trials(trials, rows, ctx.records, tracker.url)
+        tracker.publish(trials, rows, ctx.records, output)
+        print("Videos, all trajectories, and summary saved in {}".format(output), flush=True)
+        finished = True
+    finally:
+        tracker.close(failed=not finished)
     return summary
 
 
@@ -591,7 +762,11 @@ def main():
     source.add_argument("--checkpoint", help="Explicit .pth file instead of automatic best selection")
     parser.add_argument("--metric-key", help="Dataset metric suffix when a run has multiple metrics")
     parser.add_argument("--output-dir", help="New output directory; must not exist")
-    parser.add_argument("--n-rollouts", type=int, default=50)
+    parser.add_argument("--n-rollouts", type=int, default=50, help="Rollouts in each trial")
+    parser.add_argument("--n-trials", type=int, default=1,
+                        help="Repeat the evaluation this many times with disjoint seed ranges (trial k uses --seed + "
+                             "(k-1)*--n-rollouts onwards, as train_trials.py does), and report each trial's average and "
+                             "their average. With more than one, --output-dir gets a trial_NN folder per trial")
     parser.add_argument("--horizon", type=int, help="Default: checkpoint rollout horizon")
     parser.add_argument("--seed", type=int, default=10000, help="Rollout i uses seed+i")
     parser.add_argument("--camera-names", nargs="+", default=["agentview"])
@@ -602,7 +777,8 @@ def main():
     parser.add_argument("--keep-failures", action="store_true",
                         help="Also save videos of failures/errors, and join them into FAILED_ALL.mp4")
     parser.add_argument("--no-stitch", action="store_true",
-                        help="Do not also join the clips into SUCCESSFUL_ALL.mp4 and FAILED_ALL.mp4")
+                        help="Do not also join the clips into SUCCESSFUL_ALL.mp4 and FAILED_ALL.mp4 (each rollout keeps its own "
+                             "video; the joined videos are copies, so skipping them saves disk space and W&B uploads)")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--insertion-report", action="store_true",
                         help="Square task: replay the saved rollouts and report how the nut ended up on the post "
@@ -612,13 +788,16 @@ def main():
     parser.add_argument("--wandb-entity")
     parser.add_argument("--wandb-mode", choices=["online", "offline", "disabled"],
                         help="W&B mode; default online (or $WANDB_MODE) when W&B is enabled")
-    parser.add_argument("--wandb-videos", choices=WANDB_VIDEOS, default="joined",
-                        help="Videos to send: the joined SUCCESSFUL_ALL/FAILED_ALL ones, every kept clip, or none")
+    parser.add_argument("--wandb-videos", choices=WANDB_VIDEOS, default=DEFAULT_WANDB_VIDEOS,
+                        help="Videos to send: every kept clip as its rollout finishes plus the joined SUCCESSFUL_ALL/FAILED_ALL "
+                             "ones (all, the default), only the joined ones, or none")
     parser.add_argument("--name", help="W&B run name (default: the output directory's name)")
     parser.add_argument("--group", help="W&B group, to put runs of one experiment together")
     args = parser.parse_args()
-    if args.n_rollouts < 1 or args.video_skip < 1 or args.fps <= 0 or args.seed < 0:
-        parser.error("n-rollouts, video-skip and fps must be positive; seed must be nonnegative")
+    if args.n_rollouts < 1 or args.n_trials < 1 or args.video_skip < 1 or args.fps <= 0 or args.seed < 0:
+        parser.error("n-rollouts, n-trials, video-skip and fps must be positive; seed must be nonnegative")
+    if args.seed + args.n_trials * args.n_rollouts > 2 ** 32:
+        parser.error("seed + n-trials * n-rollouts must not exceed 2**32")
     if args.horizon is not None and args.horizon < 1:
         parser.error("horizon must be positive")
     run(args)

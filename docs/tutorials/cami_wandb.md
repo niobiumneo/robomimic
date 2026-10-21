@@ -486,49 +486,83 @@ examples, while the summary reports the whole evaluation budget. To train
 one model and repeat this evaluation over several trials, with a manifest and
 W&B summary, use the [trial runner](cami_trials.md).
 
+### Several trials, and each trial's average
+
+One execution is one trial of `--n-rollouts` rollouts. `--n-trials N` repeats it
+`N` times with disjoint seed ranges (trial `k` starts at `--seed + (k-1) *
+--n-rollouts`, the same ranges `train_trials.py` uses, so the two can be compared
+rollout for rollout), and reports each trial's average and the average of the
+trials. With more than one trial `--output-dir` gets a `trial_01`, `trial_02`, ...
+folder, each holding everything a single trial writes, plus:
+
+- `trials.csv`: one row per trial with its seed and the average of every metric over
+  its rollouts (success rate, return, steps, errors, and the insertion numbers);
+- `trial_results.csv` and `rollout_results.csv`: the columns `train_trials.py`
+  writes (`results/trial_results.csv`), so the same plotting scripts read them;
+- `summary.json`: every trial's numbers, their mean, SD and standard error over the
+  trials, and the pooled success rate over all rollouts with its 95% interval.
+
+The printout ends with one line per trial and the average of the trial success
+rates with its standard error, next to the pooled rate over every rollout. A single
+trial (the default) writes straight into `--output-dir`, as before.
+
 ### Sending an evaluation to Weights & Biases
 
 W&B is opt-in, as in `train.py`: `--wandb`, `--wandb-project NAME` (which also
 enables it) or `--wandb-mode online|offline|disabled`. The project defaults to the
-checkpoint's `experiment.logging.wandb_proj_name`. It never overwrites the
-training metrics: an evaluation is its own run (`job_type=rollouts`), named after
-`--name` or the output folder, and placed in `--group` if you give one. For
-example, one evaluation with failure videos kept and the output folder named:
+checkpoint's `experiment.logging.wandb_proj_name` (the run prints which it used). It
+never overwrites the training metrics: an evaluation is its own run
+(`job_type=rollouts`), named after `--name` or the output folder, and placed in
+`--group` if you give one. For example, five trials of 50 rollouts, failure videos
+kept and the output folder named:
 
 ```bash
 python -m robomimic.scripts.rollout_best \
   --run-dir trained_models/square_cami_continuous \
-  --n-rollouts 50 --keep-failures --insertion-report \
+  --n-rollouts 50 --n-trials 5 --keep-failures --insertion-report \
   --output-dir square_rollouts_cami \
   --wandb-project cami-square-v3 --name square_rollouts_cami --group rollouts
 ```
 
 The run gets:
 
-- each rollout as it finishes: `Rollout/Success`, `Rollout/Return`,
-  `Rollout/Horizon`, `Rollout/Seconds`, `Rollout/Simulator_Error` (x = `rollout`,
-  matching `demo_N`), and beside them `Running/Success_Rate/mean` and `/se`, which
-  show the estimate settling;
-- at the end, `Summary/...` fields (counts, and mean, SD, SE and n of every
-  metric, plus `Summary/Success_Rate/ci95_low` and `ci95_high`), a `rollouts`
-  table, and an artifact with `summary.json`, `rollouts.csv` and the joined-video
-  indexes;
-- the joined videos `SUCCESSFUL_ALL` and `FAILED_ALL` (failures need
-  `--keep-failures`). `--wandb-videos all` also puts each kept clip in the table,
-  and `none` sends no video. `rollouts.hdf5` is not uploaded.
+- every rollout as it finishes (x = `rollout`, counting across the trials):
+  `Rollout/Success`, `Rollout/Return`, `Rollout/Horizon`, `Rollout/Seconds`,
+  `Rollout/Simulator_Error`, `Rollout/Trial`, its video as `Rollout/Video` (captioned
+  with its trial, number, outcome and seed), and `Rollout/Running/Success_Rate/mean`
+  and `/se` over all the rollouts so far;
+- every trial as it finishes (x = `trial`, from 1): `Trial/<metric>`, the average of
+  that metric over the trial's rollouts (`Success_Rate`, `Return`, `Horizon`,
+  `Seconds`, `Simulator_Error_Rate`, `num_success`, `num_errors`, and
+  `Insertion/...` with `--insertion-report`), and `Running/<metric>/mean` and `/se`
+  over the trials so far, the names `train_trials.py` uses. The trial's joined
+  `SUCCESSFUL_ALL` and `FAILED_ALL` videos are sent too (`Video/...`, or
+  `Video/trial_NN/...` with several trials; failures need `--keep-failures`);
+- at the end, `Summary/<metric>/mean`, `/std`, `/se` and `/n` over the trials (n is
+  the number of trials), `Pooled/...` over every rollout of every trial, including
+  `Pooled/Success_Rate/ci95_low` and `ci95_high`, the tables `trials`, `rollouts`
+  and (with the insertion report) `insertions`, and an artifact with the `.csv` and
+  `.json` result files of every trial.
+
+`--wandb-videos` chooses the videos: `all` (the default) sends each kept clip with its
+rollout and the joined videos, `joined` only the joined ones, `none` no video.
+`--no-stitch` skips the joined videos, which are copies of the clips, so with it only
+the individual clips exist to send. `rollouts.hdf5` is not uploaded. Videos are the
+largest upload; use `--wandb-videos joined` or `none` to send less.
 
 A W&B problem prints one warning and never stops the evaluation; everything is
-still saved in the output folder. A rollout loop that crashes marks the run as
-failed. `summary.json` records the run's project, ID and URL under `wandb`.
+still saved in the output folder. Any failure of the evaluation itself, in a rollout
+or afterwards, marks the run as failed. `summary.json` records the run's project, ID
+and URL under `wandb`. With `--wandb-mode offline` nothing is sent; the run prints the
+`wandb sync` command to send it later.
 
-`--insertion-report` is for the Square task. After the rollouts it replays them and
-reports how the nut ended up on the post (whether it was jammed, tilted or
-dragged, and how the fingertips touched the table; see
+`--insertion-report` is for the Square task. After each trial it replays the saved
+rollouts and reports how the nut ended up on the post (whether it was jammed,
+tilted or dragged, and how the fingertips touched the table; see
 [Check how the nut ends up on the post](cami_v3.md)). It writes `insertions.csv` and
-`insertions.json`, prints the report, and sends the numbers to W&B as
-`Insertion/...` summary fields (including `jam_flag_share`) and an `insertions`
-table. A failure there is printed and does not stop the evaluation. It needs the
-same simulator as the rollouts.
+`insertions.json` into the trial's folder, prints the report, and counts the numbers
+as part of the trial (`Trial/Insertion/jam_flag_share` and so on). A failure there is
+printed and does not stop the evaluation. It needs the same simulator as the rollouts.
 
 The horizon defaults to the checkpoint setting (400 for full Square runs).
 Videos default to 20 fps with every step recorded, matching Square's 20 Hz.

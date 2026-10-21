@@ -25,7 +25,8 @@ XML = """<mujoco><option gravity="0 0 0"/><worldbody>
   <geom name="SquareNut_g2" type="box" pos="0 .03325 0" size=".04375 .0105 .01" mass=".05"/>
   <geom name="SquareNut_g3" type="box" pos="0 -.03325 0" size=".04375 .0105 .01" mass=".05"/></body>
 <body name="gripper0_right_rightfinger" pos="0 0 1.5"><freejoint/>
-  <geom name="pad_a" type="sphere" size=".01" mass=".01"/><geom name="pad_b" type="sphere" size=".01" pos="0 .005 0" mass=".01"/></body>
+  <geom name="pad_a" type="sphere" size=".01" mass=".01"/><geom name="pad_b" type="sphere" size=".01" pos="0 .005 0" mass=".01"/>
+  <body name="gripper0_right_finger_joint2_tip" pos="0 .015 0"><geom name="tip" type="sphere" size=".01" mass=".01"/></body></body>
 <body name="gripper0_right_leftfinger" pos="0 .1 1.5"><freejoint/><geom name="pad_c" type="sphere" size=".01" mass=".01"/></body>
 <body name="gripper0_right_hand" pos="0 .3 1.5"><freejoint/><geom name="palm" type="box" size=".02 .02 .02" mass=".1"/></body>
 <body name="robot0_link5" pos="0 .6 1.5"><freejoint/><geom name="forearm" type="box" size=".02 .02 .02" mass=".1"/></body>
@@ -37,15 +38,16 @@ def quat(angle_deg=0., axis=(1., 0., 0.)):
     return np.r_[np.cos(half), np.sin(half) * np.asarray(axis, float)]
 
 
-def state(nut, tilt=0., held=True, hand=(0., .3, 1.5), arm=(0., .6, 1.5), finger_on_table=False):
+def state(nut, tilt=0., held=True, hand=(0., .3, 1.5), arm=(0., .6, 1.5), finger_on_table=False, one_finger=False):
     """qpos of the five free bodies: the nut, two fingertips, the palm and a forearm.
 
-    When held, the fingertips rest on the nut's two opposite bars (the first finger has two collision geoms,
-    as a real finger has). ``finger_on_table`` instead presses the first fingertip into the table beside the nut.
+    When held, the fingertips rest on the nut's two opposite bars. The first finger has two collision geoms and
+    a pad body of its own, as a Panda finger has, so it touches the nut with three geoms of two bodies; with
+    ``one_finger`` only that finger is on the nut. ``finger_on_table`` presses it into the table beside the nut.
     """
     nut = np.asarray(nut, float)
     if held:
-        first, second = nut + [.03325, 0., .0195], nut + [-.03325, 0., .0195]
+        first, second = nut + [.03325, 0., .0195], (np.array([0., .1, 1.5]) if one_finger else nut + [-.03325, 0., .0195])
     else:
         first, second = np.array([-.1, 0., FLAT]) if finger_on_table else np.array([0., 0., 1.5]), np.array([0., .1, 1.5])
     return np.concatenate([np.r_[nut, quat(tilt)], np.r_[first, quat()], np.r_[second, quat()],
@@ -115,6 +117,51 @@ def late_slide_episode():
     return np.array(rows)
 
 
+def with_spawn_drop(rows):
+    """robosuite spawns the nut 6 cm in the air; it falls onto the table during the first states."""
+    first = np.asarray(rows[0])
+    drop = []
+    for height in (.06, .04, .02, 0.):
+        row = first.copy()
+        row[2] = FLAT + height
+        row[7:14] = state((0, 0, 1.5), held=False)[7:14]  # the gripper is not yet at the nut
+        row[14:21] = state((0, 0, 1.5), held=False)[14:21]
+        drop.append(row)
+    return np.concatenate([drop, rows])
+
+
+def regrasp_episode():
+    """Lifted, put back and slid sideways on the table, lifted again and lowered over the post from above."""
+    rows = [state((0, 0, FLAT)) for _ in range(3)]
+    rows += [state((0, 0, FLAT + (1.1 - FLAT) * k / 8)) for k in range(1, 9)]
+    rows += [state((0, 0, 1.1 - (1.1 - FLAT) * k / 8)) for k in range(1, 9)]
+    rows += [state((0, .1 * k / 10, FLAT)) for k in range(1, 11)]
+    rows += [state((0, .1, FLAT + (1.1 - FLAT) * k / 8)) for k in range(1, 9)]
+    rows += [state((.2 * k / 15, .1 * (1 - k / 15), 1.1)) for k in range(1, 16)]
+    rows += [state((.2, 0, 1.1 - (1.1 - FLAT) * k / 12)) for k in range(1, 13)]
+    return np.array(rows)
+
+
+def overshoot_episode():
+    """Carried high over the post and past it, brought back, lowered short of it and slid onto it."""
+    rows = [state((0, 0, FLAT + (1.1 - FLAT) * k / 10)) for k in range(11)]
+    rows += [state((.3 * k / 12, 0, 1.1)) for k in range(1, 13)]
+    rows += [state((.3 - .2 * k / 8, 0, 1.1)) for k in range(1, 9)]
+    rows += [state((.1, 0, 1.1 - (1.1 - FLAT) * k / 8)) for k in range(1, 9)]
+    rows += [state((.1 + .1 * k / 25, 0, FLAT)) for k in range(1, 26)]
+    return np.array(rows)
+
+
+def pushed_episode():
+    """The nut is moved beside the post at table height without being held."""
+    rows = [state((.05, 0, FLAT), held=False) for _ in range(5)] + [state((.2, 0, FLAT), held=False) for _ in range(5)]
+    return np.array(rows)
+
+
+def floating_episode():
+    return np.array([state((.2, 0, FLAT + .03), held=False) for _ in range(10)])
+
+
 def test_geom_category_follows_robosuite_body_names():
     category = insertions.geom_category
     assert category("SquareNut_main") == "nut" and category("peg1") == "peg" and category("table") == "table"
@@ -132,6 +179,25 @@ def test_post_through_hole_looks_along_the_nuts_own_axes():
     z45 = np.array([[np.cos(np.pi / 4), -np.sin(np.pi / 4), 0], [np.sin(np.pi / 4), np.cos(np.pi / 4), 0], [0, 0, 1]])
     assert check([.2, 0, .83], z45)         # the post's diagonal (2.26 cm) still fits the hole's half-width
     assert not insertions.post_through_hole([.2, 0, .83], identity, peg, .0245, .02275)  # a fatter post cannot
+
+
+def test_the_nut_frame_is_the_transpose_of_its_rotation_whatever_the_shape():
+    th = np.radians(30)
+    rot = np.array([[np.cos(th), -np.sin(th), 0], [np.sin(th), np.cos(th), 0], [0, 0, 1]])
+    np.testing.assert_allclose(insertions.to_nut_frame(rot, np.array([1., 0, 0])), [np.cos(th), -np.sin(th), 0], atol=1e-12)
+    np.testing.assert_allclose(insertions.to_nut_frame(rot, np.array([[1., 0, 0], [0, 1., 0]])),
+                               [[np.cos(th), -np.sin(th), 0], [np.sin(th), np.cos(th), 0]], atol=1e-12)
+    batch = insertions.to_nut_frame(np.stack([rot, np.eye(3)]), np.array([[1., 0, 0], [1., 0, 0]]))
+    np.testing.assert_allclose(batch, [[np.cos(th), -np.sin(th), 0], [1., 0, 0]], atol=1e-12)
+
+
+def test_post_through_hole_uses_the_nuts_rotation_not_its_transpose():
+    th = np.radians(30)
+    rot = np.array([[np.cos(th), -np.sin(th), 0], [np.sin(th), np.cos(th), 0], [0, 0, 1]])
+    check = lambda peg, rotation=rot: insertions.post_through_hole([0, 0, .8], rotation, np.array(peg), .016, .02275)
+    # both offsets are within a millimetre or two of the hole's edge, where the two conventions disagree
+    assert check([-.002, .001]) and not check([-.002, .001], rot.T)
+    assert not check([-.002, -.001]) and check([-.002, -.001], rot.T)
 
 
 def test_spearman_ignores_missing_values_and_flat_inputs():
@@ -177,6 +243,19 @@ def test_scene_counts_each_kind_of_contact():
     assert pressed["nut_peg"] > 0 and pressed["nut_peg_force"] > 0
     scene.set_state(state((.2, 0, FLAT), held=False))   # the post is inside the hole with room to spare
     assert scene.read()["nut_peg"] == 0
+
+
+def test_one_finger_touching_with_its_pad_body_too_does_not_hold_the_nut():
+    scene = make_scene()
+    scene.set_state(state((0, 0, 1.2), held=True, one_finger=True))
+    touching = [(scene.model.geom_bodyid[c.geom1], scene.model.geom_bodyid[c.geom2]) for c in scene.data.contact[:scene.data.ncon]]
+    bodies = {int(b) for pair in touching for b in pair if scene.category[np.flatnonzero(scene.model.geom_bodyid == b)[0]] == "finger"}
+    assert len(bodies) == 2  # the finger body and its pad body are both on the nut ...
+    assert scene.read()["nut_finger"] == 1  # ... and still count as one finger
+    both = analyze(np.array([state((0, 0, 1.2), held=True, one_finger=True)] * 3))
+    assert both["grasp_step"] is None
+    rows = np.array([state((0, 0, 1.2), one_finger=True)] * 2 + [state((0, 0, 1.2))] * 2)
+    assert analyze(rows)["grasp_step"] == 2
 
 
 def test_a_fingertip_on_the_table_is_counted_apart_from_the_hand_and_has_a_force():
@@ -260,12 +339,54 @@ def test_fingertips_on_the_table_before_the_grasp_are_timed_and_measured():
 
 
 def test_sliding_the_nut_while_the_fingers_close_is_not_counted_as_dragging_it_onto_the_post():
-    early, late = analyze(early_slide_episode()), analyze(late_slide_episode())
+    early, late = analyze(with_spawn_drop(early_slide_episode())), analyze(with_spawn_drop(late_slide_episode()))
     assert early["drag_steps"] >= 15 and early["drag_after_lift_steps"] == 0
     assert "dragged_on_table" not in insertions.flags(early)
     assert late["drag_after_lift_steps"] >= 20 and late["drag_steps"] == late["drag_after_lift_steps"]
     assert "dragged_on_table" in insertions.flags(late)
     assert "dragged_on_table" not in insertions.flags(late, min_drag_steps=30)
+
+
+def test_the_spawn_drop_is_not_a_lift():
+    # robosuite spawns the nut 6 cm in the air: that fall must not count as lifting it, or sliding would be counted from step 0
+    dropped = analyze(with_spawn_drop(idle_episode()))
+    assert dropped["lift"] == pytest.approx(0, abs=1e-3) and dropped["lift"] < .02
+    assert analyze(with_spawn_drop(clean_episode()))["lift"] == pytest.approx(1.1 - FLAT, abs=2e-3)
+    early = analyze(with_spawn_drop(early_slide_episode()))
+    assert early["drag_after_lift_steps"] == 0 < early["drag_steps"]
+    # a nut that is never lifted is judged from the moment it lands
+    jam = analyze(with_spawn_drop(jam_episode()))
+    assert jam["drag_after_lift_steps"] == jam["drag_steps"] >= 30
+
+
+def test_a_nut_that_is_slid_after_being_lifted_and_put_back_is_flagged_alone():
+    m = analyze(with_spawn_drop(regrasp_episode()))
+    assert m["success"] and m["seated_at_end"] and m["clearance_at_post"] > .05
+    assert m["drag_after_lift_steps"] >= 8 and insertions.flags(m) == ["dragged_on_table"]
+
+
+def test_the_arrival_at_the_post_is_judged_where_the_post_last_came_inside_the_outline():
+    m = analyze(with_spawn_drop(overshoot_episode()))
+    # the nut passed high over the post first, which says nothing about how it arrived in the end
+    assert m["success"] and m["clearance_at_post"] < 0 and "arrived_beside_post" in insertions.flags(m)
+    pushed = analyze(with_spawn_drop(pushed_episode()))
+    assert pushed["success"] and pushed["post_through_hole"] and pushed["drag_steps"] == 0  # not held, so not dragged
+    assert insertions.flags(pushed) == ["arrived_beside_post"]
+    assert analyze(clean_episode())["clearance_at_post"] > .05
+
+
+def test_flags_change_exactly_at_their_thresholds():
+    base = dict(success_without_hole=False, tilted_at_success=False, drag_after_lift_steps=0,
+                clearance_at_post=float("nan"), nut_peg_steps=0)
+    flags = insertions.flags
+    assert flags(dict(base, drag_after_lift_steps=5)) == ["dragged_on_table"] and flags(dict(base, drag_after_lift_steps=4)) == []
+    assert flags(dict(base, nut_peg_steps=40)) == ["long_contact_with_post"] and flags(dict(base, nut_peg_steps=39)) == []
+    assert flags(dict(base, drag_after_lift_steps=2), min_drag_steps=2) == ["dragged_on_table"]
+    assert flags(dict(base, nut_peg_steps=7), min_post_contact_steps=7) == ["long_contact_with_post"]
+    assert flags(dict(base, clearance_at_post=-1e-9)) == ["arrived_beside_post"]
+    assert flags(dict(base, clearance_at_post=0.)) == [] and flags(base) == []
+    assert flags(dict(base, success_without_hole=True)) == ["success_without_post_in_hole"]
+    assert flags(dict(base, tilted_at_success=True)) == ["tilted_at_success"]
 
 
 def test_episodes_need_states_and_a_model_file(tmp_path):
@@ -322,7 +443,31 @@ def test_report_over_a_dataset_flags_the_jammed_episode_only(tmp_path, replay):
     assert summary["long_post_contact"] == pytest.approx(.25) and summary["arrived_beside_post"] == pytest.approx(.25)
     assert summary["hand_table"] == pytest.approx(.25) and summary["grasped"] == pytest.approx(.5)
     assert report["episodes"]["demo_0"]["recorded_success"] is True
+    eps = report["episodes"]
+    succeeded = [m for m in eps.values() if m["success"]]
+    assert summary["median_height_above_rest_at_success"] == pytest.approx(np.median([m["height_above_rest"] for m in succeeded]))
+    assert summary["median_tilt_at_success"] == pytest.approx(np.median([m["tilt_deg"] for m in succeeded]))
+    assert summary["median_height_above_rest_at_success"] != pytest.approx(np.median([m["height_above_rest"] for m in eps.values()]))
     assert insertions.summarize(insertions.build_report(str(path), limit=1))["episodes"] == 1
+
+
+def test_every_threshold_reaches_the_analysis(tmp_path, replay):
+    path = tmp_path / "demos.hdf5"
+    write_dataset(path, [jam_episode(), tilted_episode(), floating_episode(), with_spawn_drop(early_slide_episode())])
+    default = insertions.build_report(str(path))["episodes"]
+    assert "tilted_at_success" in default["demo_1"]["flags"] and not default["demo_2"]["seated_at_end"]
+    assert {"dragged_on_table", "long_contact_with_post"} <= set(default["demo_0"]["flags"])
+    assert default["demo_3"]["drag_after_lift_steps"] == 0 < default["demo_3"]["drag_steps"]
+    run = lambda **kw: insertions.build_report(str(path), **kw)
+    assert "tilted_at_success" not in run(max_tilt_deg=50.)["episodes"]["demo_1"]["flags"]
+    assert run(seat_tolerance=.05)["episodes"]["demo_2"]["seated_at_end"]
+    assert "dragged_on_table" not in run(min_drag_steps=500)["episodes"]["demo_0"]["flags"]
+    assert "long_contact_with_post" not in run(min_post_contact_steps=500)["episodes"]["demo_0"]["flags"]
+    assert run(drag_speed=.1)["episodes"]["demo_0"]["drag_steps"] == 0
+    never_lifted = run(lift_height=.5)["episodes"]["demo_3"]  # nothing is lifted that high: sliding counts from the landing
+    assert never_lifted["drag_after_lift_steps"] == never_lifted["drag_steps"] > 0
+    thresholds = run(max_tilt_deg=40., seat_tolerance=.01, min_drag_steps=3, min_post_contact_steps=9, drag_speed=.002, lift_height=.03)["thresholds"]
+    assert thresholds == dict(max_tilt_deg=40., seat_tolerance=.01, min_drag_steps=3, min_post_contact_steps=9, drag_speed=.002, lift_height=.03)
 
 
 def test_the_state_after_the_last_action_is_replayed_when_next_states_records_it(tmp_path, replay):
@@ -391,8 +536,11 @@ def test_cli_prints_and_writes_the_outputs(tmp_path, replay, capsys):
     assert rows[0].startswith("episode,steps,success") and len(rows) == 5
     assert "finger_table_peak_force_before_grasp" in rows[0] and "grasp_step" in rows[0]
     assert any(row.startswith("demo_1,") and "dragged_on_table" in row for row in rows)
-    saved = json.loads(json_path.read_text())
+    def reject(constant):
+        raise ValueError("not strict JSON: " + constant)
+    saved = json.loads(json_path.read_text(), parse_constant=reject)  # NaN and Infinity are not JSON
     assert saved["summary"]["successes"] == 3 and set(saved["episodes"]) == {"demo_0", "demo_1", "demo_2", "demo_3"}
+    assert saved["episodes"]["demo_3"]["clearance_at_post"] is None and saved["episodes"]["demo_3"]["grasp_step"] is None
     with h5py.File(path) as f:
         assert [b.decode() for b in f["mask/no_jam"][()]] == ["demo_0", "demo_3"]
     # none of the outputs may replace a file or mask that exists
@@ -437,10 +585,57 @@ def test_cli_chooses_the_flags_that_keep_an_episode_out_of_the_mask(tmp_path, re
 def test_writing_a_mask_needs_at_least_one_acceptable_episode(tmp_path, replay):
     path = tmp_path / "demos.hdf5"
     write_dataset(path, [jam_episode(), tilted_episode()])
+    csv_path, json_path = tmp_path / "out.csv", tmp_path / "out.json"
     with pytest.raises(ValueError, match="nothing to write"):
-        insertions.main(["--dataset", str(path), "--write-mask", "none", "--quiet"])
+        insertions.main(["--dataset", str(path), "--write-mask", "none", "--csv", str(csv_path), "--json", str(json_path), "--quiet"])
     with h5py.File(path) as f:
         assert "mask" not in f
+    # the mask is decided before any output is written, so the corrected run is not blocked by leftovers
+    assert not csv_path.exists() and not json_path.exists()
+
+
+def test_the_default_mask_keeps_episodes_that_only_describe_handling(tmp_path, replay):
+    path = tmp_path / "demos.hdf5"
+    write_dataset(path, [clean_episode(), with_spawn_drop(regrasp_episode()), with_spawn_drop(pushed_episode()), tilted_episode()])
+    report = insertions.build_report(str(path))
+    assert [m["flags"] for m in report["episodes"].values()] == [[], ["dragged_on_table"], ["arrived_beside_post"], ["tilted_at_success"]]
+    insertions.main(["--dataset", str(path), "--write-mask", "default", "--quiet"])
+    insertions.main(["--dataset", str(path), "--write-mask", "all", "--mask-flags", "all", "--quiet"])
+    insertions.main(["--dataset", str(path), "--write-mask", "beside", "--mask-flags", "arrived_beside_post", "--quiet"])
+    with h5py.File(path) as f:
+        names = lambda key: [b.decode() for b in f["mask/" + key][()]]
+        assert names("default") == ["demo_0", "demo_1"]       # dragging alone does not exclude, arriving beside or tilting does
+        assert names("all") == ["demo_0"]
+        assert names("beside") == ["demo_0", "demo_1", "demo_3"]
+
+
+@pytest.mark.parametrize("argv", [["--limit", "0"], ["--limit", "-1"], ["--min-drag-steps", "0"], ["--min-post-contact-steps", "0"],
+                                  ["--max-tilt-deg", "0"], ["--seat-tolerance", "-1"], ["--drag-speed", "0"], ["--lift-height", "0"],
+                                  ["--write-mask", ""], ["--mask-flags", "all"]])
+def test_degenerate_options_are_refused_before_any_replay(tmp_path, replay, argv):
+    path = tmp_path / "demos.hdf5"
+    write_dataset(path, [clean_episode()])
+    with pytest.raises(SystemExit):
+        insertions.main(["--dataset", str(path), "--quiet"] + argv)
+    with h5py.File(path) as f:
+        assert "mask" not in f
+
+
+def test_nothing_to_report_prints_na_not_nan(tmp_path, replay, capsys):
+    path = tmp_path / "demos.hdf5"
+    write_dataset(path, [idle_episode()], drift={"demo_0": dict(checked_transitions=10, transitions_over_tolerance=1)})
+    insertions.main(["--dataset", str(path), "--quiet"])
+    text = capsys.readouterr().out
+    assert "nan" not in text.lower() and "median nut height above flat-on-the-table n/a cm" in text
+    assert "flagged episodes n/a" in text and "nut_peg_steps n/a" in text
+
+
+def test_the_printed_force_caveat_and_wording(tmp_path, replay, capsys):
+    path = tmp_path / "demos.hdf5"
+    write_dataset(path, [clean_episode()])
+    insertions.main(["--dataset", str(path), "--quiet"])
+    text = capsys.readouterr().out
+    assert "no actuator force" in text and "in contact with the post for 40+ steps" in text and "pressed" not in text
 
 
 def test_a_mask_cannot_be_written_from_a_partial_run(tmp_path, replay, capsys):

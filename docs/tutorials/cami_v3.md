@@ -318,22 +318,28 @@ python -m robomimic.scripts.inspect_square_insertions \
   --dataset square_rollouts/rollouts.hdf5 --csv rollout_insertions.csv
 ```
 
-`train_trials.py` runs the same evaluation for every trial, so each trial folder
-under `<group>/evaluations/` already holds a `rollouts.hdf5`. A rollout stops at the
-action after which the task counts as done, so the state that satisfies the success
-rule is stored only in `next_states`; the tool replays it as well, and it prints how
-many episodes it replays a different success from the one the file records.
-Rollouts that failed before their first action have no states and are listed as
-skipped.
+`train_trials.py` runs the same evaluation for every trial, so each attempt writes
+`<group>/evaluations/<trial>/<timestamp>/rollouts.hdf5` (a trial that was retried has
+one folder per attempt). A rollout stops at the action after which the task counts
+as done, so the state that satisfies the success rule is stored only in
+`next_states`; the tool replays it as well, and it prints how many episodes it
+replays a different success from the one the file records. The rule is evaluated on
+the restored poses after a forward pass, so it can fire one step before the state
+the rollout stopped at. Rollouts that failed before their first action have no
+states and are listed as skipped.
 
 For every episode it restores each recorded state and reads the poses and contacts
-there, then prints the share of successes with the post really inside the hole, the
+there, then prints how many successes have the post really inside the hole, the
 nut's height above lying flat and its tilt at the first success, whether the nut
 was lifted or slid along the table while held, whether it was above the post when
-the post first came inside its outline, how long and how hard it pressed on the
-post, and how often the fingers, hand and arm touch the table. Sliding is counted
-from the first lift (from the start if the nut is never lifted), so shifting the
-nut while the fingers close on it does not count. Episodes get flags:
+the post last came inside its outline before the success, how long it was in
+contact with the post and with what force, and how often the fingers, hand and arm
+touch the table. robosuite drops the nut onto the table from 6 cm at the start of
+every episode, so lifting is measured from the moment the nut lands. Sliding is
+counted from the first lift above `--lift-height` (from the landing if the nut is
+never lifted), so shifting the nut while the fingers close on it does not count.
+Forces come from the restored pose with no actuator force, so compare them between
+episodes; they are not what the robot applied. Episodes get flags:
 `success_without_post_in_hole`, `tilted_at_success` (past `--max-tilt-deg`),
 `dragged_on_table`, `arrived_beside_post` and `long_contact_with_post`. When the
 dataset records replay drift, it also compares the drift of flagged and unflagged
@@ -344,8 +350,10 @@ the table counts are for comparing episodes and not a reason to reject them; the
 hand and arm touching it are the interesting ones. The report also gives the step
 at which both fingers first hold the nut, and how many steps and how hard the
 fingertips pressed on the table before that, which separates a gentle touch on
-the way down from pushing the nut around. The CaMI descriptors read only the nut
-and the post, so none of this table contact appears in the labels.
+the way down from pushing the nut around. A finger counts once however many of its
+collision bodies touch the nut, and both fingers must touch it for a grasp. The CaMI
+descriptors read only the nut and the post, so none of this table contact appears in
+the labels.
 
 To train on the episodes that do not look jammed, add them as a filter key and name
 it in the config's `train.hdf5_filter_key`:
@@ -359,7 +367,8 @@ By default only the jam flags (`success_without_post_in_hole`,
 `--mask-flags` names others, or `all`. Look at the report first: with the default
 limits a long press on the post, or a few steps of sliding after the lift, can flag
 a large share of good demonstrations. The tool refuses to write a mask when
-episodes were skipped, since they would fall out of it unjudged.
+episodes were skipped, since they would fall out of it unjudged, and it decides the
+mask before writing the CSV or JSON, so a refusal leaves no files behind.
 
 The descriptor scale was fitted on the training split when the dataset was
 prepared, and filtering afterwards does not refit it. The tool refuses to replace
@@ -368,9 +377,11 @@ of seconds per episode, and `--write-mask` needs every episode, so it refuses
 `--limit`.
 
 The thresholds are options (`--max-tilt-deg`, `--seat-tolerance`,
-`--min-drag-steps`, `--min-post-contact-steps`). A nut held by its handle hangs 10
-to 20 degrees off flat, so the default tilt limit is 30. Nothing here reads a
-policy or a label, so the report is the same for every variant.
+`--min-drag-steps`, `--min-post-contact-steps`, `--drag-speed`, `--lift-height`),
+and the `--json` file records the ones it used under `thresholds`. A nut held by its handle hangs 10 to 20
+degrees off flat, so the default tilt limit is 30. The `--json` file is strict JSON:
+values that are not numbers are `null`. Nothing here reads a policy or a label, so
+the report is the same for every variant.
 
 ## Diagnostics and customization
 

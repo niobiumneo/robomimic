@@ -299,9 +299,8 @@ robosuite counts a Square episode as a success when the nut's centre is within 3
 of the post in x and y and less than 5 cm above the table, and the gripper has let
 go. It never checks that the post passes through the hole or that the nut is flat,
 so a nut jammed against the post or dragged into it counts. To see how often that
-happens, replay the episodes of a demonstration file or of a `rollouts.hdf5` from
-`rollout_best.py` (both need `states` and `model_file`, and the simulator they were
-recorded in):
+happens, replay the episodes of a demonstration file (it needs `states` and
+`model_file`, and the simulator it was recorded in):
 
 ```bash
 python -m robomimic.scripts.inspect_square_insertions \
@@ -309,12 +308,32 @@ python -m robomimic.scripts.inspect_square_insertions \
   --csv square_insertions.csv
 ```
 
+That measures the demonstrations. To measure what a policy does, give it the
+`rollouts.hdf5` that `rollout_best.py` writes next to its videos:
+
+```bash
+python -m robomimic.scripts.rollout_best --checkpoint <model_epoch_N.pth> \
+  --n-rollouts 50 --output-dir square_rollouts
+python -m robomimic.scripts.inspect_square_insertions \
+  --dataset square_rollouts/rollouts.hdf5 --csv rollout_insertions.csv
+```
+
+`train_trials.py` runs the same evaluation for every trial, so each trial folder
+under `<group>/evaluations/` already holds a `rollouts.hdf5`. A rollout stops at the
+action after which the task counts as done, so the state that satisfies the success
+rule is stored only in `next_states`; the tool replays it as well, and it prints how
+many episodes it replays a different success from the one the file records.
+Rollouts that failed before their first action have no states and are listed as
+skipped.
+
 For every episode it restores each recorded state and reads the poses and contacts
 there, then prints the share of successes with the post really inside the hole, the
 nut's height above lying flat and its tilt at the first success, whether the nut
 was lifted or slid along the table while held, whether it was above the post when
 the post first came inside its outline, how long and how hard it pressed on the
-post, and how often the fingers, hand and arm touch the table. Episodes get flags:
+post, and how often the fingers, hand and arm touch the table. Sliding is counted
+from the first lift (from the start if the nut is never lifted), so shifting the
+nut while the fingers close on it does not count. Episodes get flags:
 `success_without_post_in_hole`, `tilted_at_success` (past `--max-tilt-deg`),
 `dragged_on_table`, `arrived_beside_post` and `long_contact_with_post`. When the
 dataset records replay drift, it also compares the drift of flagged and unflagged
@@ -322,15 +341,25 @@ episodes.
 
 Fingertips on the table while they grasp a handle that lies there are normal, so
 the table counts are for comparing episodes and not a reason to reject them; the
-hand and arm touching it are the interesting ones. The CaMI descriptors read only
-the nut and the post, so none of this table contact appears in the labels.
+hand and arm touching it are the interesting ones. The report also gives the step
+at which both fingers first hold the nut, and how many steps and how hard the
+fingertips pressed on the table before that, which separates a gentle touch on
+the way down from pushing the nut around. The CaMI descriptors read only the nut
+and the post, so none of this table contact appears in the labels.
 
-To train on the episodes that raise no flag, add them as a filter key and name it
-in the config's `train.hdf5_filter_key`:
+To train on the episodes that do not look jammed, add them as a filter key and name
+it in the config's `train.hdf5_filter_key`:
 
 ```bash
 python -m robomimic.scripts.inspect_square_insertions --dataset <demos.hdf5> --write-mask no_jam
 ```
+
+By default only the jam flags (`success_without_post_in_hole`,
+`tilted_at_success`, `arrived_beside_post`) keep an episode out of the mask;
+`--mask-flags` names others, or `all`. Look at the report first: with the default
+limits a long press on the post, or a few steps of sliding after the lift, can flag
+a large share of good demonstrations. The tool refuses to write a mask when
+episodes were skipped, since they would fall out of it unjudged.
 
 The descriptor scale was fitted on the training split when the dataset was
 prepared, and filtering afterwards does not refit it. The tool refuses to replace

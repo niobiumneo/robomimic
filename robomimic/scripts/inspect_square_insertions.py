@@ -1,0 +1,417 @@
+"""Look closely at how the square nut ends up on the post, in demonstrations or in saved rollouts.
+
+Replays every episode of a robomimic HDF5 (a demonstration dataset, or the ``rollouts.hdf5`` that
+rollout_best.py writes) by restoring each recorded simulator state, and reads the contacts and poses
+there. It needs the same ``states`` and ``model_file`` that descriptor reconstruction needs, and the
+simulator it was recorded in:
+
+    python -m robomimic.scripts.inspect_square_insertions \
+        --dataset dataset/square_image_84_contactnets_state.hdf5 --csv square_insertions.csv
+
+Per episode it reports:
+  * whether the task counted as a success (robosuite's own rule) and, at that moment, whether the
+    post is really inside the nut's hole, how tilted the nut is, and how high it is above the table;
+  * how the nut was carried: lifted, or slid along the table while held, and whether it was above the
+    post when the post first came inside its outline;
+  * how long and how hard the nut pressed on the post, and how often the gripper's fingers, hand and
+    arm touch the table.
+Fingertips touching the table while they grasp a handle that lies on it are normal, so those counts are
+for comparing episodes, not for rejecting them. Nothing here reads a policy or a CaMI label.
+
+robosuite's success rule only asks that the nut's centre is within 3 cm of the post and below 5 cm above
+the table; it never checks that the nut is flat or that the post passes through the hole.
+"""
+import argparse
+import csv
+import json
+import math
+import os
+import sys
+
+import h5py
+import numpy as np
+
+# Nut dimensions (m) from robosuite's square-nut.xml, used when the model does not expose them.
+SQUARE_NUT = dict(hole_half=0.02275, outer_half=0.04375, half_thickness=0.01)
+PEG_HALF = 0.016
+CATEGORIES = ("nut", "peg", "table", "finger", "hand", "arm", "other")
+
+
+def geom_category(body_name):
+    """Which part of the scene a collision geom belongs to, from the name of its body."""
+    name = body_name or ""
+    if name.startswith("SquareNut"):
+        return "nut"
+    if name == "peg1":
+        return "peg"
+    if name == "table":
+        return "table"
+    if "finger" in name:
+        return "finger"
+    if name.startswith("gripper0"):
+        return "hand"
+    if name.startswith("robot0"):
+        return "arm"
+    return "other"
+
+
+class Scene:
+    """Reads one recorded state at a time from a simulator model.
+
+    ``set_state(state)`` must put the simulator in that state and run the forward pass, so that contacts
+    exist. ``eef_site`` is the id of the gripper's grasp site, as robosuite's success rule uses.
+    """
+
+    def __init__(self, model, data, set_state, table_z, eef_site=None):
+        import mujoco
+        self.mj, self.model, self.data, self.set_state = mujoco, model, data, set_state
+        self.table_z, self.eef_site = float(table_z), eef_site
+        self.nut_body = self._body("SquareNut_main")
+        self.peg_body = self._body("peg1")
+        self.category = np.array([geom_category(self._body_name(int(b))) for b in model.geom_bodyid], dtype=object)
+        peg_geoms = np.flatnonzero(model.geom_bodyid == self.peg_body)
+        self.peg_pos = np.array(model.body_pos[self.peg_body])  # the post is welded to the world
+        self.peg_half = float(model.geom_size[peg_geoms[0]][0]) if len(peg_geoms) else PEG_HALF
+        self.peg_top = (float(self.peg_pos[2] + model.geom_pos[peg_geoms[0]][2] + model.geom_size[peg_geoms[0]][2])
+                        if len(peg_geoms) else float("nan"))
+        self.dims = self._nut_dimensions()
+
+    def _body(self, name):
+        index = self.mj.mj_name2id(self.model, self.mj.mjtObj.mjOBJ_BODY, name)
+        if index < 0:
+            raise ValueError("The scene has no body named {}; this tool is for the Square task".format(name))
+        return index
+
+    def _body_name(self, index):
+        return self.mj.mj_id2name(self.model, self.mj.mjtObj.mjOBJ_BODY, index)
+
+    def _nut_dimensions(self):
+        """Hole and outline half-widths and half-thickness from the four bar geoms, else the asset's values."""
+        try:
+            bars = [self.mj.mj_name2id(self.model, self.mj.mjtObj.mjOBJ_GEOM, "SquareNut_g{}".format(i)) for i in range(4)]
+            pos, size = self.model.geom_pos[bars], self.model.geom_size[bars]
+            axis = np.argmax(np.abs(pos[:, :2]), axis=1)          # the bar's offset axis (x or y)
+            offset = np.abs(pos[np.arange(4), axis])
+            width = size[np.arange(4), axis]
+            return dict(hole_half=float((offset - width).min()), outer_half=float((offset + width).max()),
+                        half_thickness=float(size[:, 2].max()))
+        except Exception:
+            return dict(SQUARE_NUT)
+
+    def read(self):
+        """Poses and contact counts at the current state."""
+        m, d, c = self.model, self.data, self.category
+        out = dict(nut_pos=np.array(d.xpos[self.nut_body]), nut_rot=np.array(d.xmat[self.nut_body]).reshape(3, 3),
+                   eef=np.array(d.site_xpos[self.eef_site]) if self.eef_site is not None else np.full(3, np.nan))
+        counts = dict(nut_table=0, nut_peg=0, finger_table=0, hand_table=0, arm_table=0)
+        fingers, force = set(), 0.0
+        wrench = np.zeros(6)
+        for i in range(d.ncon):
+            contact = d.contact[i]
+            if contact.dist > 1e-3:
+                continue
+            a, b = int(contact.geom1), int(contact.geom2)
+            pair = {c[a], c[b]}
+            if pair == {"nut", "table"}:
+                counts["nut_table"] += 1
+            elif pair == {"nut", "peg"}:
+                counts["nut_peg"] += 1
+                self.mj.mj_contactForce(m, d, i, wrench)
+                force += max(0.0, float(wrench[0]))
+            elif pair == {"nut", "finger"}:
+                fingers.add(b if c[b] == "finger" else a)
+            elif pair == {"finger", "table"}:
+                counts["finger_table"] += 1
+            elif pair == {"hand", "table"}:
+                counts["hand_table"] += 1
+            elif pair == {"arm", "table"}:
+                counts["arm_table"] += 1
+        out.update(counts, nut_finger=len(fingers), nut_peg_force=force)
+        return out
+
+
+def scene_from_env(env):
+    """The adapter for a robomimic environment wrapper around robosuite."""
+    from robomimic.CAMI.continuous_mujoco import native_model_data
+    sim = env.env.sim
+    model, data = native_model_data(sim)
+
+    def set_state(state):
+        env.reset_to({"states": state})
+        sim.forward()
+    site = env.env.robots[0].eef_site_id
+    return Scene(model, data, set_state, env.env.table_offset[2], site["right"] if isinstance(site, dict) else site)
+
+
+def extract(scene, states):
+    """Per-step features of one episode, as arrays with one row per recorded state."""
+    rows = []
+    for state in states:
+        scene.set_state(state)
+        rows.append(scene.read())
+    features = {key: np.asarray([r[key] for r in rows]) for key in rows[0]}
+    features["peg_pos"] = scene.peg_pos
+    return features, dict(table_z=scene.table_z, peg_top=scene.peg_top, peg_half=scene.peg_half, **scene.dims)
+
+
+def post_through_hole(nut_pos, nut_rot, peg_xy, peg_half, hole_half, tolerance=1e-3):
+    """Whether the post's four corners lie inside the nut's square hole, seen along the nut's own axes."""
+    corners = np.asarray(peg_xy) + peg_half * np.array([[-1, -1], [-1, 1], [1, -1], [1, 1]])
+    relative = np.c_[corners - np.asarray(nut_pos)[:2], np.zeros(4)]
+    local = relative @ nut_rot  # rows are R^T v
+    return bool(np.abs(local[:, :2]).max() <= hole_half + tolerance)
+
+
+def analyze(f, geometry, max_tilt_deg=30., seat_tolerance=.005, drag_speed=.001, reach_scale=10.):
+    """Metrics for one episode from its features (see extract)."""
+    pos, rot, eef, peg = f["nut_pos"], f["nut_rot"], f["eef"], np.asarray(f["peg_pos"])
+    T = len(pos)
+    z_rest = geometry["table_z"] + geometry["half_thickness"]  # nut lying flat on the table
+    tilt = np.degrees(np.arccos(np.clip(rot[:, 2, 2], -1., 1.)))
+    near = (np.abs(pos[:, 0] - peg[0]) < .03) & (np.abs(pos[:, 1] - peg[1]) < .03) & (pos[:, 2] < geometry["table_z"] + .05)
+    far_enough = 1. - np.tanh(reach_scale * np.linalg.norm(eef - pos, axis=1)) < .6
+    success = near & (far_enough | np.isnan(eef).any(axis=1))
+    first = int(np.argmax(success)) if success.any() else None
+    at = first if first is not None else T - 1
+    seated_flags = np.array([post_through_hole(pos[t], rot[t], peg[:2], geometry["peg_half"], geometry["hole_half"])
+                             for t in range(T)])
+    seated = seated_flags & (tilt <= max_tilt_deg) & (pos[:, 2] - z_rest <= seat_tolerance)
+    # carrying
+    speed = np.r_[0., np.linalg.norm(np.diff(pos[:, :2], axis=0), axis=1)]
+    held = f["nut_finger"] > 0
+    drag = (f["nut_table"] > 0) & held & (speed > drag_speed)
+    # the first step at which the post is inside the nut's outline: is the nut above it, or beside it?
+    local = np.einsum("tij,ti->tj", rot, np.c_[peg[:2] - pos[:, :2], np.zeros(T)])
+    inside_outline = np.abs(local[:, :2]).max(axis=1) <= geometry["outer_half"] + geometry["peg_half"]
+    enter = int(np.argmax(inside_outline)) if inside_outline.any() else None
+    margin = (float(pos[enter, 2] - geometry["half_thickness"] - geometry["peg_top"]) if enter is not None else float("nan"))
+    return dict(
+        steps=T, success=first is not None, first_success=first, seated_at_end=bool(seated[-1]),
+        success_without_hole=bool(first is not None and not seated_flags[first]),
+        tilted_at_success=bool(first is not None and tilt[first] > max_tilt_deg),
+        tilt_deg=float(tilt[at]), height_above_rest=float(pos[at, 2] - z_rest),
+        post_through_hole=bool(seated_flags[at]), xy_offset=float(np.linalg.norm(pos[at, :2] - peg[:2])),
+        lift=float(pos[:, 2].max() - z_rest), drag_steps=int(drag.sum()), clearance_at_post=margin,
+        nut_table_held_steps=int(((f["nut_table"] > 0) & held).sum()), held_steps=int(held.sum()),
+        finger_table_steps=int((f["finger_table"] > 0).sum()), hand_table_steps=int((f["hand_table"] > 0).sum()),
+        arm_table_steps=int((f["arm_table"] > 0).sum()), nut_peg_steps=int((f["nut_peg"] > 0).sum()),
+        peak_post_force=float(f["nut_peg_force"].max()))
+
+
+def flags(m, min_drag_steps=5, min_post_contact_steps=40):
+    out = []
+    if m["success_without_hole"]:
+        out.append("success_without_post_in_hole")
+    if m["tilted_at_success"]:
+        out.append("tilted_at_success")
+    if m["drag_steps"] >= min_drag_steps:
+        out.append("dragged_on_table")
+    if m["clearance_at_post"] == m["clearance_at_post"] and m["clearance_at_post"] < 0:
+        out.append("arrived_beside_post")
+    if m["nut_peg_steps"] >= min_post_contact_steps:
+        out.append("long_contact_with_post")
+    return out
+
+
+def ranks(values):
+    """Ranks from 0, with equal values sharing the average of the ranks they span."""
+    values = np.asarray(values, float)
+    order = np.argsort(values, kind="stable")
+    result, start = np.empty(len(values)), 0
+    while start < len(values):
+        stop = start
+        while stop + 1 < len(values) and values[order[stop + 1]] == values[order[start]]:
+            stop += 1
+        result[order[start:stop + 1]] = (start + stop) / 2.
+        start = stop + 1
+    return result
+
+
+def spearman(a, b):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    ok = np.isfinite(a) & np.isfinite(b)
+    if ok.sum() < 3 or np.ptp(a[ok]) == 0 or np.ptp(b[ok]) == 0:
+        return float("nan")
+    return float(np.corrcoef(ranks(a[ok]), ranks(b[ok]))[0, 1])
+
+
+def episodes(path):
+    """(names, metadata) of the episodes with replayable states in a robomimic HDF5."""
+    with h5py.File(path, "r") as f:
+        names = sorted(f["data"], key=lambda x: int(x.split("_")[-1]))
+        usable = [n for n in names if "states" in f["data"][n] and "model_file" in f["data"][n].attrs]
+        meta = json.loads(f["data"].attrs.get("cami_c", "{}"))
+    if not usable:
+        raise ValueError("{} has no episodes with both states and a model_file; descriptor reconstruction needs "
+                         "them too (use the original raw demonstrations)".format(path))
+    return usable, meta
+
+
+def build_report(path, limit=None, max_tilt_deg=30., seat_tolerance=.005, min_drag_steps=5, min_post_contact_steps=40,
+                 make_scene=None, progress=False):
+    from robomimic.CAMI import continuous_mujoco as physics
+    names, meta = episodes(path)
+    names = names[:limit] if limit else names
+    results = {}
+    with h5py.File(path, "r") as f:
+        env = physics.make_replay_env(f["data"])
+        try:
+            recorded = {n: bool(f["data"][n].attrs["success"]) for n in names if "success" in f["data"][n].attrs}
+            for index, name in enumerate(names):
+                demo = f["data"][name]
+                physics.reset_demo(env, demo)
+                scene = (make_scene or scene_from_env)(env)
+                features, geometry = extract(scene, demo["states"][()])
+                metrics = analyze(features, geometry, max_tilt_deg, seat_tolerance)
+                metrics["flags"] = flags(metrics, min_drag_steps, min_post_contact_steps)
+                if name in recorded:
+                    metrics["recorded_success"] = recorded[name]
+                results[name] = metrics
+                if progress:
+                    print("  {} ({}/{})".format(name, index + 1, len(names)), flush=True)
+        finally:
+            close = getattr(env, "close", None) or getattr(getattr(env, "env", None), "close", None)
+            if close:
+                close()
+    drift = {n: d for n, d in (meta.get("demos") or {}).items() if n in results and "transitions_over_tolerance" in d}
+    return dict(dataset=str(path), episodes=results, drift=drift)
+
+
+def summarize(report):
+    eps = report["episodes"]
+    n = len(eps)
+    values = lambda key: np.array([m[key] for m in eps.values()], dtype=float)
+    frac = lambda mask: float(np.mean(mask)) if n else float("nan")
+    success = values("success").astype(bool)
+    no_hole = values("success_without_hole").astype(bool)
+    tilted = values("tilted_at_success").astype(bool)
+    summary = dict(
+        episodes=n, successes=int(success.sum()), success_with_post_in_hole=int((success & ~no_hole).sum()),
+        success_without_post_in_hole=int(no_hole.sum()), tilted_at_success=int(tilted.sum()),
+        seated_at_end=int(values("seated_at_end").astype(bool).sum()), never_succeeded=int((~success).sum()),
+        median_height_above_rest_at_success=float(np.median(values("height_above_rest")[success])) if success.any() else float("nan"),
+        long_post_contact=frac(values("nut_peg_steps") >= 40), median_post_contact_steps=float(np.median(values("nut_peg_steps"))),
+        median_peak_post_force=float(np.median(values("peak_post_force"))),
+        lifted_over_3cm=frac(values("lift") > .03), median_lift=float(np.median(values("lift"))),
+        dragged_while_held=frac(values("drag_steps") >= 5), median_drag_steps=float(np.median(values("drag_steps"))),
+        arrived_beside_post=frac(np.nan_to_num(values("clearance_at_post"), nan=1.) < 0),
+        finger_table=frac(values("finger_table_steps") > 0), hand_table=frac(values("hand_table_steps") > 0),
+        arm_table=frac(values("arm_table_steps") > 0), median_tilt_at_success=float(np.median(values("tilt_deg")[success])) if success.any() else float("nan"),
+        flagged={name: m["flags"] for name, m in eps.items() if m["flags"]})
+    recorded = [(m["success"], m["recorded_success"]) for m in eps.values() if "recorded_success" in m]
+    if recorded:
+        summary["recorded_vs_replayed_success_mismatch"] = int(sum(a != b for a, b in recorded))
+    if report["drift"]:
+        over = np.array([report["drift"][k]["transitions_over_tolerance"] / max(1, report["drift"][k]["checked_transitions"])
+                         for k in report["drift"]])
+        summary["drift_over_tolerance_median"] = float(np.median(over))
+        flagged = np.array([bool(eps[k]["flags"]) for k in report["drift"]])
+        summary["drift_over_tolerance_flagged_vs_not"] = (float(np.median(over[flagged])) if flagged.any() else float("nan"),
+                                                           float(np.median(over[~flagged])) if (~flagged).any() else float("nan"))
+        for key in ("nut_peg_steps", "drag_steps", "tilt_deg", "peak_post_force"):
+            summary["drift_vs_" + key] = spearman(over, [eps[k][key] for k in report["drift"]])
+    return summary
+
+
+def print_summary(summary):
+    p = lambda *a: print(*a, flush=True)
+    n = summary["episodes"]
+    p("Episodes: {} | counted as success: {} (post inside the nut's hole at that step: {}, post not in the hole: {}) | "
+      "never succeeded: {}".format(n, summary["successes"], summary["success_with_post_in_hole"],
+                                   summary["success_without_post_in_hole"], summary["never_succeeded"]))
+    p("At the first success: median nut height above flat-on-the-table {:.1f} cm, median tilt {:.1f} deg, tilted past the limit in {} "
+      "episodes. Nut flat and seated at the last step: {} of {}".format(
+          100 * summary["median_height_above_rest_at_success"], summary["median_tilt_at_success"], summary["tilted_at_success"],
+          summary["seated_at_end"], n))
+    if "recorded_vs_replayed_success_mismatch" in summary:
+        p("Success recorded in the file differs from the replayed rule in {} episodes".format(
+            summary["recorded_vs_replayed_success_mismatch"]))
+    p("\nCarrying")
+    p("  nut lifted more than 3 cm: {:.0%} (median lift {:.1f} cm)".format(summary["lifted_over_3cm"], 100 * summary["median_lift"]))
+    p("  slid along the table while held for 5+ steps: {:.0%} (median {:.0f} steps)".format(
+        summary["dragged_while_held"], summary["median_drag_steps"]))
+    p("  post came inside the nut's outline with the nut not above it: {:.0%}".format(summary["arrived_beside_post"]))
+    p("  nut pressed on the post for 40+ steps (2 s): {:.0%} (median {:.0f} steps, median peak force {:.1f} N)".format(
+        summary["long_post_contact"], summary["median_post_contact_steps"], summary["median_peak_post_force"]))
+    p("\nTable contact (share of episodes with any step)")
+    p("  fingers {:.0%} | hand {:.0%} | arm {:.0%}   (fingertips on the table while grasping a flat handle are normal)".format(
+        summary["finger_table"], summary["hand_table"], summary["arm_table"]))
+    if "drift_over_tolerance_median" in summary:
+        a, b = summary["drift_over_tolerance_flagged_vs_not"]
+        p("\nReplay drift (share of transitions over tolerance): median {:.0%}; flagged episodes {:.0%}, others {:.0%}".format(
+            summary["drift_over_tolerance_median"], a, b))
+        p("  rank correlation of drift with: " + ", ".join(
+            "{} {:+.2f}".format(k[len("drift_vs_"):], v) for k, v in summary.items() if k.startswith("drift_vs_")))
+    flagged = summary["flagged"]
+    p("\nFlagged episodes: {} of {}".format(len(flagged), n))
+    for reason in ("success_without_post_in_hole", "tilted_at_success", "dragged_on_table", "arrived_beside_post",
+                   "long_contact_with_post"):
+        names = [k for k, v in flagged.items() if reason in v]
+        p("  {:<20} {:>4}  {}".format(reason, len(names), ", ".join(names[:12]) + (" ..." if len(names) > 12 else "")))
+
+
+def write_csv(path, report):
+    fields = ["episode", "steps", "success", "first_success", "success_without_hole", "tilted_at_success", "seated_at_end", "tilt_deg",
+              "height_above_rest", "post_through_hole", "xy_offset", "lift", "drag_steps", "clearance_at_post", "held_steps",
+              "nut_table_held_steps", "finger_table_steps", "hand_table_steps", "arm_table_steps", "nut_peg_steps", "peak_post_force",
+              "flags"]
+    with open(path, "x", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for name, m in report["episodes"].items():
+            writer.writerow(dict(m, episode=name, flags=";".join(m["flags"])))
+
+
+def write_mask(path, report, key):
+    """Add mask/<key> listing the episodes that raise no flag. Refuses to replace an existing mask."""
+    clean = [n for n, m in report["episodes"].items() if not m["flags"]]
+    if not clean:
+        raise ValueError("Every episode is flagged; there is nothing to write")
+    with h5py.File(path, "r+") as f:
+        masks = f.require_group("mask")
+        if key in masks:
+            raise ValueError("mask/{} already exists in {}".format(key, path))
+        masks.create_dataset(key, data=np.asarray(clean, dtype="S"))
+    return clean
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dataset", required=True, help="Demonstration HDF5, or rollouts.hdf5 from rollout_best.py")
+    parser.add_argument("--limit", type=int, help="Only the first N episodes")
+    parser.add_argument("--max-tilt-deg", type=float, default=30., help="Tilt of the nut that counts as tilted (a nut held by its handle hangs about 10-20 deg)")
+    parser.add_argument("--seat-tolerance", type=float, default=.005, help="Largest height (m) above lying flat for a seated nut")
+    parser.add_argument("--min-drag-steps", type=int, default=5, help="Steps of sliding on the table while held that flag an episode")
+    parser.add_argument("--min-post-contact-steps", type=int, default=40, help="Steps of pressing on the post that flag an episode")
+    parser.add_argument("--csv", help="Write one row per episode to this new file")
+    parser.add_argument("--json", help="Write the full report to this new file")
+    parser.add_argument("--write-mask", metavar="KEY", help="Add mask/KEY to the dataset, listing the unflagged episodes")
+    parser.add_argument("--quiet", action="store_true", help="Do not print progress")
+    args = parser.parse_args(argv)
+    for target in (args.csv, args.json):
+        if target and os.path.exists(target):
+            parser.error("refusing to replace an existing file: " + target)
+    if args.write_mask:
+        if args.limit:
+            parser.error("--write-mask lists the unflagged episodes, so it needs every episode analyzed; drop --limit")
+        with h5py.File(args.dataset, "r") as f:
+            if "mask/" + args.write_mask in f:
+                parser.error("mask/{} already exists in {}".format(args.write_mask, args.dataset))
+    report = build_report(args.dataset, args.limit, args.max_tilt_deg, args.seat_tolerance, args.min_drag_steps,
+                          args.min_post_contact_steps, progress=not args.quiet)
+    summary = summarize(report)
+    print_summary(summary)
+    if args.csv:
+        write_csv(args.csv, report)
+    if args.json:
+        with open(args.json, "x") as stream:
+            json.dump(dict(summary=summary, **report), stream, indent=2,
+                      default=lambda x: x.item() if hasattr(x, "item") else str(x))
+    if args.write_mask:
+        clean = write_mask(args.dataset, report, args.write_mask)
+        print("Wrote mask/{} with {} episodes".format(args.write_mask, len(clean)))
+    return report, summary
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

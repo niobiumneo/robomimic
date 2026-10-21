@@ -293,6 +293,56 @@ share their batch size, sequence length, seed and validation split, and compare
 and resets the hidden state every 10 steps, so it is the wrong control for
 `faithful`. Runs from `train.py` with another config also differ in those.
 
+## Check how the nut ends up on the post
+
+robosuite counts a Square episode as a success when the nut's centre is within 3 cm
+of the post in x and y and less than 5 cm above the table, and the gripper has let
+go. It never checks that the post passes through the hole or that the nut is flat,
+so a nut jammed against the post or dragged into it counts. To see how often that
+happens, replay the episodes of a demonstration file or of a `rollouts.hdf5` from
+`rollout_best.py` (both need `states` and `model_file`, and the simulator they were
+recorded in):
+
+```bash
+python -m robomimic.scripts.inspect_square_insertions \
+  --dataset dataset/square_image_84_contactnets_state.hdf5 \
+  --csv square_insertions.csv
+```
+
+For every episode it restores each recorded state and reads the poses and contacts
+there, then prints the share of successes with the post really inside the hole, the
+nut's height above lying flat and its tilt at the first success, whether the nut
+was lifted or slid along the table while held, whether it was above the post when
+the post first came inside its outline, how long and how hard it pressed on the
+post, and how often the fingers, hand and arm touch the table. Episodes get flags:
+`success_without_post_in_hole`, `tilted_at_success` (past `--max-tilt-deg`),
+`dragged_on_table`, `arrived_beside_post` and `long_contact_with_post`. When the
+dataset records replay drift, it also compares the drift of flagged and unflagged
+episodes.
+
+Fingertips on the table while they grasp a handle that lies there are normal, so
+the table counts are for comparing episodes and not a reason to reject them; the
+hand and arm touching it are the interesting ones. The CaMI descriptors read only
+the nut and the post, so none of this table contact appears in the labels.
+
+To train on the episodes that raise no flag, add them as a filter key and name it
+in the config's `train.hdf5_filter_key`:
+
+```bash
+python -m robomimic.scripts.inspect_square_insertions --dataset <demos.hdf5> --write-mask no_jam
+```
+
+The descriptor scale was fitted on the training split when the dataset was
+prepared, and filtering afterwards does not refit it. The tool refuses to replace
+a mask or an output file that exists. It replays every step, which takes a couple
+of seconds per episode, and `--write-mask` needs every episode, so it refuses
+`--limit`.
+
+The thresholds are options (`--max-tilt-deg`, `--seat-tolerance`,
+`--min-drag-steps`, `--min-post-contact-steps`). A nut held by its handle hangs 10
+to 20 degrees off flat, so the default tilt limit is 30. Nothing here reads a
+policy or a label, so the report is the same for every variant.
+
 ## Diagnostics and customization
 
 W&B/TensorBoard include raw losses, effective weights and:

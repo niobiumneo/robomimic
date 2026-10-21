@@ -270,7 +270,12 @@ because its group folder already exists: add `--resume` to continue it, or use
 another `--name` (or delete the folder) to start over. Resuming needs the same
 options as the first attempt, so a changed `--n-trials` or `--run-dir` is refused.
 If a trial fails again, the child's traceback is printed just above the
-"Stopped at" line. An interrupted training run with a
+"Stopped at" line. A child with no traceback that "died with Signals.SIGKILL" was
+ended by the operating system, almost always its out-of-memory killer (several jobs
+at once, or the rollout phase of training): the launcher says so, and `dmesg -T |
+grep -i 'killed process'` shows which process it chose. Free memory, run fewer jobs
+at a time, and use `--resume`. Training resumes from `last.pth`, so at most the
+interrupted epoch is repeated. An interrupted training run with a
 `last.pth` resumes with the trainer's optimizer and checkpoint resume (it does
 not restore the complete RNG state of an uninterrupted run), and the same W&B
 training run continues, as does the evaluation run. A trial that failed is evaluated again into a new

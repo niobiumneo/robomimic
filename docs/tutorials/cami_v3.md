@@ -328,6 +328,13 @@ the restored poses after a forward pass, so it can fire one step before the stat
 the rollout stopped at. Rollouts that failed before their first action have no
 states and are listed as skipped.
 
+Other kinds of rollouts do not work as well. The videos that `train.py` writes hold
+no simulator state, so they cannot be analyzed. A file written by
+`run_trained_agent.py --dataset_path` has `states` and `model_file`, but only the
+state before each action, with no `next_states` and no `success` attribute: the
+state that satisfies the success rule is missing, so its successes can read as
+never succeeded. Evaluate those checkpoints again with `rollout_best.py`.
+
 For every episode it restores each recorded state and reads the poses and contacts
 there, then prints how many successes have the post really inside the hole, the
 nut's height above lying flat and its tilt at the first success, whether the nut

@@ -2,6 +2,7 @@
 import argparse
 import csv
 import json
+import statistics
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -179,7 +180,7 @@ SCRIPT = [("success", 4), ("fail", None), ("success", 3), ("error", 2), ("fail",
 FRAMES = [4, 6, 3, 2, 6, 5]  # horizon 6 for the timeouts; an error keeps the frames before it
 
 
-def run_scripted(tmp_path, monkeypatch, project=None, policy=None, env_name=None, script=None, **changes):
+def run_scripted(tmp_path, monkeypatch, project=None, policy=None, env_name=None, script=None, env_class=None, **changes):
     """Run the scripted rollouts; ``project`` is the W&B project in the checkpoint's config, if any."""
     checkpoint = tmp_path / "model.pth"
     metadata = {"env_kwargs": {"control_freq": 20}}
@@ -190,7 +191,7 @@ def run_scripted(tmp_path, monkeypatch, project=None, policy=None, env_name=None
     if project:
         experiment.logging = SimpleNamespace(wandb_proj_name=project)
     config = SimpleNamespace(experiment=experiment)
-    env = ScriptedEnv(script or SCRIPT)
+    env = (env_class or ScriptedEnv)(script or SCRIPT)
     monkeypatch.setattr(helper.FileUtils, "config_from_checkpoint", lambda **kw: (config, kw["ckpt_dict"]))
     monkeypatch.setattr(helper.FileUtils, "policy_from_checkpoint", lambda **kw: (policy or FakePolicy(), kw["ckpt_dict"]))
     monkeypatch.setattr(helper.FileUtils, "env_from_checkpoint", lambda **kw: (env, kw["ckpt_dict"]))
@@ -366,16 +367,30 @@ ALL_SUCCEED = [("success", 3)] * 6          # a second trial in which every roll
 TWO_TRIALS = dict(script=SCRIPT + ALL_SUCCEED, n_trials=2)
 
 
+@pytest.fixture(autouse=True)
+def clean_wandb_environment(monkeypatch):
+    """Whether W&B is on must come from the arguments, not from the shell the tests run in."""
+    for name in ("WANDB_MODE", "WANDB_ENTITY", "WANDB_API_KEY", "WANDB_PROJECT"):
+        monkeypatch.delenv(name, raising=False)
+
+
 class FakeSummary(dict):
-    pass
+    fail = False
+
+    def update(self, *args, **kwargs):
+        if self.fail:
+            raise ConnectionError("summary rejected")
+        super().update(*args, **kwargs)
 
 
 class FakeRun:
     id, url = "fake-run", "https://example.invalid/run"
 
-    def __init__(self, fail_log_at=None, fail_finish=False):
+    def __init__(self, fail_log_at=None, fail_finish=False, fail_summary=False, fail_artifact=False):
         self.rows, self.definitions, self.summary = [], [], FakeSummary()
+        self.summary.fail = fail_summary
         self.finished, self.artifact, self.fail_log_at, self.fail_finish = None, None, fail_log_at, fail_finish
+        self.fail_artifact = fail_artifact
 
     def log(self, values, **kwargs):
         if self.fail_log_at is not None and len(self.rows) + 1 == self.fail_log_at:
@@ -386,6 +401,8 @@ class FakeRun:
         self.definitions.append((name, kwargs))
 
     def log_artifact(self, artifact):
+        if self.fail_artifact:
+            raise ConnectionError("artifact rejected")
         self.artifact = artifact
 
     def finish(self, exit_code=None):
@@ -406,8 +423,9 @@ class FakeWandb:
     """The part of the wandb module that rollout_best uses, with the signatures of the real one (checked against
     wandb 0.30: Video(data_or_path, caption, fps, format), Table(columns, data), Artifact.add_file(local_path, name))."""
 
-    def __init__(self, run=None, init_error=None):
+    def __init__(self, run=None, init_error=None, table_error=None):
         self.run, self.init_error, self.init_calls = run or FakeRun(), init_error, []
+        self.table_error = table_error
         self.Artifact = FakeArtifact
 
     def init(self, **kwargs):
@@ -417,6 +435,8 @@ class FakeWandb:
         return self.run
 
     def Table(self, columns=None, data=None):
+        if self.table_error:
+            raise self.table_error
         return SimpleNamespace(columns=list(columns), data=[list(row) for row in data])
 
     def Video(self, data_or_path, caption=None, fps=None, format=None):
@@ -543,7 +563,10 @@ def test_the_wandb_run_follows_every_rollout_and_gets_the_results(tmp_path, monk
     assert (call["project"], call["entity"], call["group"], call["job_type"], call["name"], call["mode"]) == (
         "cami-square", "lab", "exp1", "rollouts", "my-eval", "online")
     assert call["dir"] == str(output) and call["config"]["n_rollouts"] == 6 and call["config"]["seed"] == 10000
-    assert call["config"]["n_trials"] == 1 and call["config"]["wandb_videos"] == "all"
+    assert call["config"] == {
+        "checkpoint": str(tmp_path / "model.pth"), "epoch": None, "training_success_rate": None, "n_trials": 1, "n_rollouts": 6,
+        "horizon": 6, "seed": 10000, "camera_names": ["agentview"], "video_skip": 1, "fps": 60, "keep_failures": True,
+        "output_dir": str(output), "insertion_report": False, "wandb_videos": "all"}
     assert ("rollout", {}) in run.definitions and ("Rollout/*", {"step_metric": "rollout"}) in run.definitions
     assert ("trial", {}) in run.definitions and ("Trial/*", {"step_metric": "trial"}) in run.definitions
     assert ("Running/*", {"step_metric": "trial"}) in run.definitions
@@ -552,6 +575,8 @@ def test_the_wandb_run_follows_every_rollout_and_gets_the_results(tmp_path, monk
     assert logged(run, "Rollout/Success") == [1., 0., 1., 0., 0., 1.]
     assert logged(run, "Rollout/Simulator_Error") == [0., 0., 0., 1., 0., 0.]
     assert logged(run, "Rollout/Horizon") == [4, 6, 3, 2, 6, 5]
+    assert logged(run, "Rollout/Return") == [4, 6, 3, 2, 6, 5]  # the scripted environment pays 1 per step
+    assert len(logged(run, "Rollout/Seconds")) == 6 and all(0 <= seconds < 5 for seconds in logged(run, "Rollout/Seconds"))
     assert logged(run, "Rollout/Running/Success_Rate/mean") == pytest.approx([1., .5, 2 / 3, .5, .4, .5])
     assert "Rollout/Running/Success_Rate/se" not in run.rows[0]
     assert logged(run, "Rollout/Running/Success_Rate/se")[-1] == pytest.approx((.5 * .5 * 6 / 5 / 6) ** .5)
@@ -572,6 +597,10 @@ def test_the_wandb_run_follows_every_rollout_and_gets_the_results(tmp_path, monk
     assert (run.summary["Pooled/Success_Rate/ci95_low"], run.summary["Pooled/Success_Rate/ci95_high"]) == pytest.approx(
         helper.wilson_interval(3, 6))
     assert run.summary["Summary/Simulator_Error_Rate/mean"] == pytest.approx(1 / 6)
+    assert run.summary["Summary/Return/mean"] == pytest.approx(26 / 6) and run.summary["Summary/Return/n"] == 1
+    assert run.summary["Pooled/Return/mean"] == pytest.approx(26 / 6) and run.summary["Pooled/Return/n"] == 6
+    assert run.summary["Pooled/Return/std"] == pytest.approx(statistics.stdev([4, 6, 3, 2, 6, 5]))
+    assert run.summary["Pooled/Seconds/n"] == 6 and run.summary["Pooled/Horizon/mean"] == pytest.approx(26 / 6)
     (trials_table,) = logged(run, "trials")
     assert trials_table.columns[:3] == ["trial", "seed", "num_rollouts"] and trials_table.data[0][:3] == [1, 10000, 6]
     assert trials_table.data[0][trials_table.columns.index("Success_Rate")] == .5
@@ -591,6 +620,7 @@ def test_the_wandb_run_follows_every_rollout_and_gets_the_results(tmp_path, monk
     assert json.loads((output / "summary.json").read_text())["wandb"]["url"] == run.url
     text = capsys.readouterr().out
     assert "W&B: project cami-square (from --wandb-project), mode online" in text and "W&B: https://example.invalid/run" in text
+    assert "return per rollout: mean 4.33, SD 1.63" in text and "steps per rollout: mean 4.33, SD 1.63" in text
 
 
 def logged_row(run, key):
@@ -827,7 +857,9 @@ def test_a_failing_insertion_report_never_costs_the_evaluation(tmp_path, monkeyp
     output, summary = run_scripted(tmp_path, monkeypatch, wandb_mode="online", wandb_project="p", no_stitch=True,
                                    insertion_report=True)
     assert summary["n_rollouts_completed"] == 6 and not (output / "insertions.csv").exists()
-    assert "Could not make the insertion report (RuntimeError: no EGL)" in capsys.readouterr().out
+    text = capsys.readouterr().out
+    assert "Could not make the insertion report (RuntimeError: no EGL)" in text
+    assert "saved in {}: summary.json, rollouts.csv, rollouts.hdf5\n".format(output) in text  # nothing is claimed that was not written
     assert not any(k.startswith("Summary/Insertion/") for k in fake.run.summary) and not logged(fake.run, "insertions")
     assert fake.run.finished == 0
 
@@ -862,3 +894,39 @@ def test_the_command_line_has_the_wandb_trial_and_report_options(monkeypatch, ca
         with pytest.raises(SystemExit):
             helper.main()
     assert "must not exceed 2**32" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("failure", [dict(run=FakeRun(fail_summary=True)), dict(run=FakeRun(fail_artifact=True)),
+                                     dict(table_error=ValueError("table rejected"))])
+def test_a_wandb_failure_while_sending_the_results_never_costs_the_evaluation(tmp_path, monkeypatch, capsys, failure):
+    fake = install_wandb(monkeypatch, **failure)
+    output, summary = run_scripted(tmp_path, monkeypatch, wandb_mode="online", wandb_project="p")
+    assert summary["n_rollouts_completed"] == 6 and fake.run.finished == 0
+    text = capsys.readouterr().out
+    assert text.count("W&B tracking stopped") == 1
+    assert "Results over 6 rollouts" in text and "Videos, all trajectories, and summary saved in" in text  # printing went on
+    for name in ("summary.json", "rollouts.csv", "rollouts.hdf5", "SUCCESSFUL_ALL.mp4"):
+        assert (output / name).exists()
+    assert len(logged(fake.run, "rollout")) == 6 and logged(fake.run, "trial") == [1]  # what had gone up stays
+
+
+class GraspEnv(ScriptedEnv):
+    """Also reports a second success measure, true when the rollout succeeds."""
+
+    def is_success(self):
+        result = super().is_success()
+        return dict(result, grasp=result["task"] or self.episode == 1)
+
+
+def test_another_success_measure_is_saved_logged_and_averaged_per_trial(tmp_path, monkeypatch):
+    fake = install_wandb(monkeypatch)
+    output, summary = run_scripted(tmp_path, monkeypatch, env_class=GraspEnv, wandb_mode="online", wandb_project="p", no_stitch=True)
+    run = fake.run
+    assert logged(run, "Rollout/grasp_Success_Rate") == [1., 1., 1., 0., 0., 1.]
+    assert logged(run, "Trial/grasp_Success_Rate") == [pytest.approx(4 / 6)]
+    assert run.summary["Summary/grasp_Success_Rate/mean"] == pytest.approx(4 / 6)
+    assert run.summary["Pooled/grasp_Success_Rate/n"] == 6
+    with (output / "rollouts.csv").open() as stream:
+        rows = list(csv.DictReader(stream))
+    assert [r["grasp_Success_Rate"] for r in rows] == ["1.0", "1.0", "1.0", "0.0", "0.0", "1.0"]
+    assert summary["metrics"]["grasp_Success_Rate"] == pytest.approx(4 / 6)

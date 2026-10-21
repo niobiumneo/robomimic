@@ -1,6 +1,7 @@
 """Square-nut insertion report: geometry helpers, the metrics, contacts read from a small MuJoCo scene, and the CLI."""
 
 import json
+import math
 from types import SimpleNamespace
 
 import h5py
@@ -438,7 +439,7 @@ def replay(monkeypatch):
     monkeypatch.setattr(insertions, "scene_from_env", lambda env: make_scene())
 
 
-def test_report_over_a_dataset_flags_the_jammed_episode_only(tmp_path, replay):
+def test_report_over_a_dataset_flags_the_jammed_episode_only(tmp_path, replay, capsys):
     path = tmp_path / "demos.hdf5"
     write_dataset(path, [clean_episode(), jam_episode(), tilted_episode(), idle_episode()],
                   recorded=[True, True, True, False])
@@ -450,6 +451,14 @@ def test_report_over_a_dataset_flags_the_jammed_episode_only(tmp_path, replay):
     assert summary["episodes"] == 4 and summary["successes"] == 3 and summary["never_succeeded"] == 1
     assert summary["success_with_post_in_hole"] == 2 and summary["success_without_post_in_hole"] == 1
     assert summary["tilted_at_success"] == 1 and summary["seated_at_end"] == 1 and summary["seated_checked"] == 4
+    # demo_1 (jammed along the table) and demo_2 (tilted) raise a jam flag; the count, its share and the printed line agree
+    assert summary["jam_flag_episodes"] == 2 and summary["jam_flag_share"] == pytest.approx(.5)
+    insertions.print_summary(summary)
+    assert "raising a jam flag (success_without_post_in_hole, tilted_at_success, arrived_beside_post): 2 of 4" in capsys.readouterr().out
+    logged = insertions.logged_values(summary)
+    assert logged["Insertion/jam_flag_episodes"] == 2 and logged["Insertion/jam_flag_share"] == .5 and logged["Insertion/episodes"] == 4
+    assert all(key.startswith("Insertion/") and key[len("Insertion/"):] in insertions.LOGGED for key in logged)
+    assert all(math.isfinite(value) for value in logged.values())
     assert summary["recorded_vs_replayed_success_mismatch"] == 0
     assert summary["dragged_after_lift"] == pytest.approx(.25) and summary["dragged_at_any_time"] == pytest.approx(.25)
     assert summary["long_post_contact"] == pytest.approx(.25) and summary["arrived_beside_post"] == pytest.approx(.25)
@@ -498,6 +507,20 @@ def test_the_state_after_the_last_action_is_replayed_when_next_states_records_it
     summary = insertions.summarize(insertions.build_report(str(path)))
     assert summary["recorded_vs_replayed_success_mismatch"] == 2
     assert (summary["seated_at_end"], summary["seated_checked"]) == (0, 2)  # only the two that did not end at a success count
+
+
+def test_when_no_episode_could_be_checked_the_seated_number_is_n_a_and_not_sent(tmp_path, replay, capsys):
+    rows = clean_episode()
+    first = analyze(rows)["first_success"]
+    path = tmp_path / "rollouts.hdf5"
+    write_dataset(path, [rows[:first]], later=[rows[1:first + 1]])
+    summary = insertions.summarize(insertions.build_report(str(path)))
+    assert (summary["seated_at_end"], summary["seated_checked"]) == (0, 0)
+    insertions.print_summary(summary)
+    assert "Nut flat and seated at the last step: n/a" in capsys.readouterr().out
+    logged = insertions.logged_values(summary)
+    assert "Insertion/seated_at_end" not in logged and logged["Insertion/seated_checked"] == 0
+    assert logged["Insertion/successes"] == 1  # the rest is still there
 
 
 def test_a_report_of_rollouts_says_that_their_last_step_was_not_judged(tmp_path, replay, capsys):

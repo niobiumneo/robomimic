@@ -441,9 +441,10 @@ def print_summary(summary):
       "never succeeded: {}".format(n, summary["successes"], summary["success_with_post_in_hole"],
                                    summary["success_without_post_in_hole"], summary["never_succeeded"]))
     p("At the first success: median nut height above flat-on-the-table {} cm, median tilt {} deg, tilted past the limit in {} "
-      "episodes. Nut flat and seated at the last step: {} of {}".format(
+      "episodes. Nut flat and seated at the last step: {}".format(
           number(summary["median_height_above_rest_at_success"], ".1f", 100), number(summary["median_tilt_at_success"], ".1f"),
-          summary["tilted_at_success"], summary["seated_at_end"], summary["seated_checked"]))
+          summary["tilted_at_success"],
+          "{} of {}".format(summary["seated_at_end"], summary["seated_checked"]) if summary["seated_checked"] else "n/a"))
     if summary["seated_checked"] < n:
         p("  ({} episodes end at their first success, as a rollout does, so their last step says nothing about the nut staying "
           "seated; judge those by the post in the hole and the tilt at the success)".format(n - summary["seated_checked"]))

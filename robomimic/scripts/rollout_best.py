@@ -203,7 +203,9 @@ class WandbTracker:
     It opens before the first rollout and gets each rollout as it finishes (its numbers and, with --wandb-videos all,
     its video), each trial as it finishes (its numbers and their mean and standard error over the trials so far),
     and at the end the summary, the tables, the result files and the insertion report. Tracking is a convenience
-    and must never cost an evaluation: if W&B fails, one warning is printed and the evaluation carries on without it.
+    and must never cost an evaluation: if W&B fails, one warning is printed and the evaluation carries on without
+    sending more. The run stays open until the evaluation ends, so W&B does not show it as finished while rollouts
+    are still running, and it is then marked failed. One video that cannot be sent is skipped and stops nothing.
     """
 
     def __init__(self, mode, project, entity, group, name, directory, config, videos=DEFAULT_WANDB_VIDEOS):
@@ -211,6 +213,7 @@ class WandbTracker:
         self.output, self.videos = Path(directory), videos
         # W&B's media panels index by _step, so every row goes at the rollout it belongs to (see log_rollout).
         self.step = 0
+        self.stopped, self.videos_lost = False, 0
         try:
             import wandb
             from robomimic import macros as Macros
@@ -230,6 +233,11 @@ class WandbTracker:
                     self.output / "wandb" / "latest-run"), flush=True)
         except Exception as exc:
             self.give_up(exc)
+            self.run = None  # nothing was opened, so there is nothing to keep open
+
+    @property
+    def active(self):
+        return self.run is not None and not self.stopped
 
     @property
     def url(self):
@@ -244,13 +252,19 @@ class WandbTracker:
                 "url": getattr(self.run, "url", None)}
 
     def give_up(self, exc):
-        print("W&B tracking stopped ({}: {}). The evaluation continues and everything is still saved in the "
-              "output directory.".format(type(exc).__name__, exc), flush=True)
-        self.close()
+        """Stop sending. The run is not closed here: it stays open until the evaluation ends, then ends failed."""
+        if not self.stopped:
+            print("W&B tracking stopped ({}: {}). The evaluation continues and everything is still saved in the "
+                  "output directory; the W&B run stays open until the evaluation ends and is then marked failed.".format(
+                      type(exc).__name__, exc), flush=True)
+        self.stopped = True
 
-    def log_rollout(self, record, records, number, trial):
-        """One finished rollout: ``number`` counts the rollouts of all trials, ``records`` are those so far."""
-        if self.run is None:
+    def log_rollout(self, record, records, number, trial, folder):
+        """One finished rollout: ``number`` counts the rollouts of all trials, ``records`` are those so far.
+
+        ``folder`` is where the trial keeps its clips.
+        """
+        if not self.active:
             return
         try:
             values = {"rollout": number, "Rollout/Trial": trial, "Rollout/Success": float(bool(record["Success_Rate"])),
@@ -259,10 +273,6 @@ class WandbTracker:
             for key in metric_keys([record]):
                 if key.endswith("_Success_Rate") and key != "Success_Rate":
                     values["Rollout/" + key] = record[key]
-            if self.videos == "all" and record["video"]:
-                values["Rollout/Video"] = self.wandb.Video(
-                    str(self.output / record["video"]), format="mp4",
-                    caption="trial {} rollout {} | {} | seed {}".format(trial, record["rollout"], record["status"], record["seed"]))
             stats = describe([r["Success_Rate"] for r in records])
             values["Rollout/Running/Success_Rate/mean"] = stats["mean"]
             if stats["se"] is not None:
@@ -271,10 +281,23 @@ class WandbTracker:
             self.run.log(values, step=self.step)
         except Exception as exc:
             self.give_up(exc)
+            return
+        if self.videos == "all" and record["video"]:
+            # a video is sent apart from the numbers, so one that cannot be read costs neither them nor the rest
+            try:
+                self.run.log({"rollout": number, "Rollout/Video": self.wandb.Video(
+                    str(Path(folder) / record["video"]), format="mp4",
+                    caption="trial {} rollout {} | {} | seed {}".format(trial, record["rollout"], record["status"], record["seed"]))},
+                    step=self.step)
+            except Exception as exc:
+                self.videos_lost += 1
+                if self.videos_lost <= 3:
+                    print("W&B could not take the video of trial {} rollout {} ({}: {}); it is skipped.".format(
+                        trial, record["rollout"], type(exc).__name__, exc), flush=True)
 
     def log_trial(self, trial, rows, folder, summary, n_trials):
         """One finished trial: its numbers with the running mean/SE over the trials, and its joined videos."""
-        if self.run is None:
+        if not self.active:
             return
         try:
             self.run.log(trial_values(trial, rows), step=self.step)
@@ -290,7 +313,7 @@ class WandbTracker:
 
     def publish(self, trials, rows, records, output):
         """Add the results of the finished evaluation: summary fields, tables and the result files."""
-        if self.run is None:
+        if not self.active:
             return
         try:
             wandb, run = self.wandb, self.run
@@ -318,11 +341,13 @@ class WandbTracker:
             self.give_up(exc)
 
     def close(self, failed=False):
-        """Finish the run; a failed evaluation marks it failed."""
+        """Finish the run, as failed if the evaluation failed or the sending stopped before the end."""
         run, self.run = self.run, None
         if run is not None:
+            if self.videos_lost:
+                print("{} videos could not be sent to W&B; they are in the output directory.".format(self.videos_lost), flush=True)
             try:
-                run.finish(exit_code=1 if failed else 0)
+                run.finish(exit_code=1 if failed or self.stopped else 0)
             except Exception as exc:
                 print("Could not close the W&B run ({}: {})".format(type(exc).__name__, exc), flush=True)
 
@@ -571,7 +596,7 @@ def evaluate_trial(ctx, folder, number, first_seed, offset):
                                 video_frames=len(frames) if video else 0))
             dataset.flush()
             ctx.records.append(records[-1])
-            tracker.log_rollout(records[-1], ctx.records, offset + index, number)
+            tracker.log_rollout(records[-1], ctx.records, offset + index, number, folder)
             summary.update(n_rollouts_completed=len(records),
                            num_success=len(masks["successful"]),
                            num_errors=len(masks["errors"]),

@@ -551,8 +551,11 @@ the individual clips exist to send. `rollouts.hdf5` is not uploaded. Videos are 
 largest upload; use `--wandb-videos joined` or `none` to send less.
 
 A W&B problem prints one warning and never stops the evaluation; everything is
-still saved in the output folder. Any failure of the evaluation itself, in a rollout
-or afterwards, marks the run as failed. `summary.json` records the run's project, ID
+still saved in the output folder. After such a problem nothing more is sent, but the
+run stays open until the evaluation ends (so W&B does not show it as finished while
+rollouts are still running) and is then marked failed. One video that cannot be sent is
+skipped and costs nothing else. Any failure of the evaluation itself, in a rollout
+or afterwards, also marks the run as failed. `summary.json` records the run's project, ID
 and URL under `wandb`. With `--wandb-mode offline` nothing is sent; the run prints the
 `wandb sync` command to send it later.
 

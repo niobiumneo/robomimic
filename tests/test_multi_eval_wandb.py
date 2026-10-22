@@ -131,17 +131,22 @@ class FakeRun:
         self.sdk, self.id = sdk, run_id
         self.url = "https://example.invalid/" + run_id
         self.summary, self.history, self.definitions, self.artifacts = {}, [], [], []
+        self.steps = []
         self.exit_code = None
 
     def define_metric(self, name, **kwargs):
         self.sdk.consume_random()
         self.definitions.append((name, kwargs))
 
-    def log(self, values):
+    def log(self, values, step=None):
         self.sdk.consume_random()
         if self.sdk.fail_log:
             self.sdk.fail_log = False
             raise RuntimeError("connection lost")
+        # W&B drops rows whose explicit step goes backwards.
+        if self.steps and step is not None and step < self.steps[-1]:
+            raise AssertionError("step {} after {}".format(step, self.steps[-1]))
+        self.steps.append(step)
         self.history.append(values.copy())
 
     def log_artifact(self, artifact):
@@ -561,6 +566,26 @@ class EvaluationWandbTests(unittest.TestCase):
         self.assertTrue(all(Path(row["Rollout/Video"].path).is_file() for row in episodes))
         self.assertEqual(sdk.runs[0].exit_code, 0)
         self.assertEqual(sdk.runs[0].summary["Evaluation/Num_Rollouts"], 50)
+
+    def test_video_step_matches_its_rollout_across_trials(self):
+        # The media panel labels clips by _step; trial summaries must not shift that off the rollout index.
+        args = self.args("steps", "--n_trials", "3", "--rollouts_per_trial", "4", "--seed", "0",
+                         "--wandb-project", "cami", "--wandb-videos")
+        sdk = FakeWandb(self.evaluator)
+        self.evaluate_with_videos(args, sdk)
+        run = sdk.runs[0]
+        _, rows = self.csv_rows(args, "rollout_results.csv")
+        clips = [(step, row) for step, row in zip(run.steps, run.history) if "Rollout/Video" in row]
+        self.assertEqual([step for step, _ in clips], list(range(1, 13)))
+        for (step, row), saved in zip(clips, rows):
+            self.assertEqual(row["rollout"], step)
+            self.assertEqual(row["Rollout/Video"].path, saved["video"])
+            status = "successful" if float(saved["success"]) else "failed"
+            self.assertIn(status, Path(saved["video"]).name)
+            self.assertEqual(row["Rollout/Video"].caption, "Rollout {} | trial {} episode {} | {}".format(
+                step, int(saved["trial"]) + 1, int(saved["rollout"]) + 1, status))
+        trial_steps = [step for step, row in zip(run.steps, run.history) if "Trial/Success_Rate_Mean" in row]
+        self.assertEqual(trial_steps, [4, 8, 12])
 
     def test_video_writers_close_when_simulation_raises(self):
         def failing_environment(*args, **kwargs):

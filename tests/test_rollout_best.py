@@ -387,14 +387,17 @@ class FakeRun:
     id, url = "fake-run", "https://example.invalid/run"
 
     def __init__(self, fail_log_at=None, fail_finish=False, fail_summary=False, fail_artifact=False):
-        self.rows, self.definitions, self.summary = [], [], FakeSummary()
+        self.rows, self.steps, self.definitions, self.summary = [], [], [], FakeSummary()
         self.summary.fail = fail_summary
         self.finished, self.artifact, self.fail_log_at, self.fail_finish = None, None, fail_log_at, fail_finish
         self.fail_artifact = fail_artifact
 
-    def log(self, values, **kwargs):
+    def log(self, values, step=None, **kwargs):
         if self.fail_log_at is not None and len(self.rows) + 1 == self.fail_log_at:
             raise ConnectionError("lost the connection")
+        # W&B drops rows whose explicit step goes backwards.
+        assert not self.steps or step is None or step >= self.steps[-1], (step, self.steps[-1])
+        self.steps.append(step)
         self.rows.append(values)
 
     def define_metric(self, name, **kwargs):
@@ -650,6 +653,12 @@ def test_trials_are_logged_with_their_running_mean_and_standard_error(tmp_path, 
     # each trial's joined videos are named by trial
     keys = {key for row in run.rows for key in row if key.startswith("Video/")}
     assert keys == {"Video/trial_01/SUCCESSFUL_ALL", "Video/trial_01/FAILED_ALL", "Video/trial_02/SUCCESSFUL_ALL"}
+    # the media panel labels clips by _step: each clip sits at its own rollout, and the trial rows, joined videos
+    # and tables share the step of the trial's last rollout instead of pushing the second trial's clips along
+    assert [step for step, row in zip(run.steps, run.rows) if "Rollout/Video" in row] == list(range(12))
+    assert [step for step, row in zip(run.steps, run.rows) if "trial" in row] == [5, 11]
+    assert {step for step, row in zip(run.steps, run.rows) if any(key.startswith("Video/") for key in row)} == {5, 11}
+    assert [step for step, row in zip(run.steps, run.rows) if "rollouts" in row] == [11]
     assert sorted(name for _, name in run.artifact.files) == sorted([
         "FAILED_ALL.csv".replace("FAILED_ALL", "trial_01/FAILED_ALL"), "trial_01/SUCCESSFUL_ALL.csv", "trial_01/rollouts.csv",
         "trial_01/summary.json", "trial_02/SUCCESSFUL_ALL.csv", "trial_02/rollouts.csv", "trial_02/summary.json",

@@ -209,6 +209,8 @@ class WandbTracker:
     def __init__(self, mode, project, entity, group, name, directory, config, videos=DEFAULT_WANDB_VIDEOS):
         self.run, self.wandb, self.mode, self.project = None, None, mode, project
         self.output, self.videos = Path(directory), videos
+        # W&B's media panels index by _step, so every row goes at the rollout it belongs to (see log_rollout).
+        self.step = 0
         try:
             import wandb
             from robomimic import macros as Macros
@@ -265,7 +267,8 @@ class WandbTracker:
             values["Rollout/Running/Success_Rate/mean"] = stats["mean"]
             if stats["se"] is not None:
                 values["Rollout/Running/Success_Rate/se"] = stats["se"]
-            self.run.log(values)
+            self.step = number
+            self.run.log(values, step=self.step)
         except Exception as exc:
             self.give_up(exc)
 
@@ -274,11 +277,11 @@ class WandbTracker:
         if self.run is None:
             return
         try:
-            self.run.log(trial_values(trial, rows))
+            self.run.log(trial_values(trial, rows), step=self.step)
             if self.videos != "none":
                 for name, details in summary.get("compilations", {}).items():
                     key = "Video/" + name if n_trials == 1 else "Video/trial_{:02d}/{}".format(trial, name)
-                    self.run.log({key: self.wandb.Video(str(folder / details["video"]), format="mp4")})
+                    self.run.log({key: self.wandb.Video(str(folder / details["video"]), format="mp4")}, step=self.step)
                 if not summary.get("compilations") and summary.get("num_videos"):
                     print("No joined videos to send to W&B (--no-stitch or the join failed){}.".format(
                         "" if self.videos == "all" else "; use --wandb-videos all to send each clip"), flush=True)
@@ -295,15 +298,16 @@ class WandbTracker:
             names = sorted({name for row in rows for name in row})
             run.log({"trials": wandb.Table(columns=["trial", "seed", "num_rollouts"] + names, data=[
                 [trial["number"], trial["seed"], len(trial["records"])] + [row.get(name) for name in names]
-                for trial, row in zip(trials, rows)])})
+                for trial, row in zip(trials, rows)])}, step=self.step)
             run.log({"rollouts": wandb.Table(columns=["trial"] + list(ROLLOUT_FIELDS), data=[
                 [trial["number"]] + [rollout_row(record)[field] for field in ROLLOUT_FIELDS]
-                for trial in trials for record in trial["records"]])})
+                for trial in trials for record in trial["records"]])}, step=self.step)
             reports = [(trial["number"], trial["insertion"]) for trial in trials if trial["insertion"] is not None]
             if reports:
                 from robomimic.scripts import inspect_square_insertions as insertions
                 run.log({"insertions": wandb.Table(columns=["trial"] + list(insertions.TABLE_COLUMNS), data=[
-                    [number] + row for number, (report, _) in reports for row in insertions.table_rows(report)])})
+                    [number] + row for number, (report, _) in reports for row in insertions.table_rows(report)])},
+                        step=self.step)
             artifact = wandb.Artifact("rollouts-" + str(run.id), type="rollouts")
             for path in sorted(output.rglob("*")):
                 relative = path.relative_to(output)

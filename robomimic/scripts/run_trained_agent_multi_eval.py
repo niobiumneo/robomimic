@@ -357,14 +357,17 @@ class WandbEvaluation:
         elif getattr(self.run, "url", None):
             print("W&B evaluation: {}".format(self.run.url), flush=True)
 
-    def log(self, values, video_path=None):
+    def log(self, values, video_path=None, caption=None):
         if self.run is None or self.logging_error:
             return
         try:
             with preserve_random_state():
                 if video_path and self.wandb_videos:
-                    values = dict(values, **{"Rollout/Video": self.sdk.Video(video_path, format="mp4")})
-                self.run.log(values)
+                    values = dict(values, **{"Rollout/Video": self.sdk.Video(video_path, format="mp4",
+                                                                             caption=caption)})
+                # Media panels index by _step, so pin it to the rollout count; trial rows merge into
+                # their last rollout's step instead of shifting every later video by one.
+                self.run.log(values, step=self.completed)
         except Exception as exc:
             self.logging_error = True
             print("W&B streaming stopped ({}). Evaluation continues; results are saved to CSV.".format(exc),
@@ -402,7 +405,9 @@ class WandbEvaluation:
             "Running/Return": self.returns / self.completed,
             "Running/Horizon": self.horizons / self.completed,
             **trial_values,
-        }, video_path=video_path)
+        }, video_path=video_path, caption="Rollout {} | trial {} episode {} | {}".format(
+            self.completed, trial_idx + 1, rollout_idx + 1,
+            "successful" if stats["Success_Rate"] else "failed"))
 
     def log_trial(self, row):
         self.completed_trial_rows.append(row.copy())
@@ -450,7 +455,7 @@ class WandbEvaluation:
                         tables[name] = self.sdk.Table(columns=columns,
                                                       data=[[row[column] for column in columns] for row in rows])
                 if tables:
-                    self.run.log(tables)
+                    self.run.log(tables, step=self.completed)
                 if csv_paths:
                     artifact = self.sdk.Artifact("{}-rollout-results".format(self.run.id), type="evaluation")
                     for path in csv_paths:

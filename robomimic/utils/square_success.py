@@ -7,7 +7,7 @@ robosuite (NutAssembly._check_success) counts a rollout as a success when, at on
     nut's centre, which means d > RELEASE_DISTANCE (4.24 cm).
 It never looks at the nut's tilt. Holding the handle does not block it: a handle grasp keeps d around 6 to 7 cm.
 
-So a nut that sits on the post can still fail: resting on the post's top or rim (its centre is 11 to 13 cm above the
+So a nut that sits on the post can still fail: resting on the post's top or rim (its centre is 11 to 14 cm above the
 table), wedged tilted and too high, held and tilted over the post, or with the hand still within 4.24 cm of it.
 ``RuleTracker`` follows a rollout and says which of these it ended in, and which came closest to a success.
 Only numpy is needed.
@@ -21,18 +21,20 @@ HEIGHT_LIMIT = 0.05
 REACH_SCALE = 10.
 REACH_LIMIT = 0.6
 RELEASE_DISTANCE = math.atanh(1. - REACH_LIMIT) / REACH_SCALE  # 0.042365 m
-HOLDING_DISTANCE = 0.10      # a hand this close to the nut's centre is holding it (a handle grasp is 6 to 7 cm)
+HOLDING_DISTANCE = 0.10      # without contact information, a hand this close to the nut's centre counts as holding it
 POST_TOP_HEIGHT = 0.10       # a nut centre this high above the table is on the post's top, not down over it
 NEAR_POST = 0.10             # a nut within this of the post in the table plane is "beside" it
 
+# What each reason says about the state a rollout ENDED in (Failure_Reason) or about the state that came closest (Closest_Reason).
 REASONS = {
     "success": "the rule was met",
-    "gripper_not_released": "the nut is down over the post but the hand is still within 4.2 cm of it",
-    "resting_on_post_top": "the nut sits on the top or rim of the post, 10 cm or more above the table",
-    "held_above_post": "the nut is held over the post but not lowered below the height limit",
-    "wedged_above_limit": "the nut is over the post, loose, and between 5 and 10 cm above the table",
+    "gripper_not_released": "the nut is down over the post but the hand is within 4.2 cm of it",
+    "resting_on_post_top": "the nut is over the post, 10 cm or more above the table, and no finger touches it",
+    "held_above_post": "the nut is over the post, above the 5 cm limit, and a finger touches it",
+    "wedged_above_limit": "the nut is over the post, between 5 and 10 cm above the table, and no finger touches it",
     "beside_post": "the nut is within 10 cm of the post but more than 3 cm off in x or y",
-    "far_from_post": "the nut never came within 10 cm of the post",
+    "far_from_post": "the nut is more than 10 cm from the post",
+    "simulator_error": "the simulator raised an error",
 }
 
 
@@ -66,13 +68,18 @@ def violation(c):
 
 
 def failure_reason(c):
-    """Why one state (scalars) does not meet the rule: a key of REASONS."""
+    """Why one state (scalars) does not meet the rule: a key of REASONS.
+
+    "Held" means a finger touches the nut when the state says how many do (``fingers_on_nut``, which the live probe
+    reads from the simulator's contacts); without that it falls back on the hand being within HOLDING_DISTANCE.
+    """
     if bool(c["success"]):
         return "success"
     if c["xy_ok"] and c["z_ok"]:
         return "gripper_not_released"
     if c["xy_ok"]:
-        if c["hand"] <= HOLDING_DISTANCE:
+        holding = c["fingers_on_nut"] > 0 if "fingers_on_nut" in c else c["hand"] <= HOLDING_DISTANCE
+        if holding:
             return "held_above_post"
         return "resting_on_post_top" if c["height"] >= POST_TOP_HEIGHT else "wedged_above_limit"
     return "beside_post" if math.hypot(c["dx"], c["dy"]) <= NEAR_POST else "far_from_post"

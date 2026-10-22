@@ -472,7 +472,8 @@ new folder under the run's `successful_rollouts/`:
   before and after each action, model XML, episode metadata, and success flags.
   Masks `successful`, `failed`, and `errors` select the outcomes.
 - `rollouts.csv`: one row per rollout with its seed, outcome, return, length,
-  seconds, any simulator error and its video.
+  seconds, any simulator error and its video, and on the Square task the failure reason
+  and final numbers (see below).
 - `summary.json`: checkpoint path, original training evaluation score,
   rollout seeds, outcomes, return, length, video filenames, and the new success
   rate across every requested rollout, with its 95% confidence interval (Wilson
@@ -520,26 +521,32 @@ It never looks at the nut's tilt, and holding the handle does not block a succes
 handle grasp keeps the grip point 6 to 7 cm from the nut's centre. So a nut that is down over the
 post and still held counts; what does not count, although it can look finished in a video, is:
 
-| reason | what the nut is doing |
+| reason | the state the rollout ended in (`Closest_Reason`: the state nearest to the rule) |
 | --- | --- |
-| `resting_on_post_top` | on the top or rim of the post, its centre 10 cm or more above the table |
-| `wedged_above_limit` | over the post, loose, between 5 and 10 cm above the table |
-| `held_above_post` | over the post, in the hand, not lowered below 5 cm |
+| `resting_on_post_top` | over the post, its centre 10 cm or more above the table (on the top or rim of the post), no finger touching it |
+| `wedged_above_limit` | over the post, between 5 and 10 cm above the table, no finger touching it |
+| `held_above_post` | over the post, above 5 cm, and at least one finger touches it |
 | `gripper_not_released` | down over the post but the hand is within 4.24 cm of it (it flips to a success when the hand backs off) |
 | `beside_post` | within 10 cm of the post but more than 3 cm off in x or y |
-| `far_from_post` | never within 10 cm of the post |
+| `far_from_post` | more than 10 cm from the post at the end (it may have been nearer earlier: see `Closest_Reason`) |
+| `simulator_error` | the simulator raised an error, whatever the nut was doing before |
 
 Each rollout gets `Failure_Reason` (what it ended in, which is what the end of its video shows),
 `Final_Nut_Height_cm`, `Final_XY_Offset_cm`, `Final_Hand_Distance_cm`, `Final_Tilt_deg`,
 `Closest_Reason` (what stopped the state that came nearest to the rule, by how far each
-condition is from its limit as a fraction of that limit) and `Closest_Step`, in `rollouts.csv`,
-`summary.json` and the W&B `rollouts` table; the four final numbers are also logged per rollout and
-the video caption names the reason. Each trial gets the share of its rollouts that failed each way
-(`Trial/Failure/<reason>`, a way that did not occur in a trial counts as 0) and the run summary
-`Summary/Failure/<reason>/...` and `Pooled/Failure/<reason>`. The printout lists the reasons with
-the medians of their numbers. The rule is re-computed from the simulator after every step and
-compared with the environment's own success; if they ever disagree the printout says the reasons
-are unreliable and `Rule_Mismatch_Steps` counts the steps. Other tasks get no reasons.
+condition is from its limit as a fraction of that limit), `Closest_Step` and `Rule_Mismatch_Steps`,
+in `rollouts.csv`, `summary.json` and the W&B `rollouts` table; the four final numbers are also
+logged per rollout, and the video caption names the reason of a failure. Each trial that was
+followed gets the share of its rollouts that ended each way (`Trial/Failure/<reason>`, 0 for a way
+that did not occur; a trial whose rollouts could not be followed has no such numbers and is left
+out of their averages), with `Running/Failure/<reason>/...` over the trials so far, the run
+summary `Summary/Failure/<reason>/...` and `Pooled/Failure/<reason>`. The printout lists the
+reasons with the medians of their numbers. A rollout whose probe failed part way has no reason at
+all, rather than one from an earlier step. Held means a finger touches the nut (read from the
+simulator's contacts), not that the hand is near. The rule is re-computed from the simulator after
+every step and compared with the environment's own success; if they ever disagree the printout
+says the reasons are unreliable, and `Rule_Mismatch_Steps` (per rollout, and
+`Pooled/Rule_Mismatch_Steps`) counts the steps. Other tasks get no reasons.
 
 A video made with `--video-skip` above 1 can also end a few steps before the step where success was
 registered, with the nut still above the height limit; `rollout_best.py` always adds the last frame,
@@ -568,12 +575,14 @@ The run gets:
 - every rollout as it finishes (x = `rollout`, counting across the trials):
   `Rollout/Success`, `Rollout/Return`, `Rollout/Horizon`, `Rollout/Seconds`,
   `Rollout/Simulator_Error`, `Rollout/Trial`, its video as `Rollout/Video` (captioned
-  with its trial, number, outcome and seed), and `Rollout/Running/Success_Rate/mean`
-  and `/se` over all the rollouts so far;
+  with its trial, number, outcome, the failure reason of a Square failure, and seed),
+  the final nut height, offset, hand distance and tilt, and
+  `Rollout/Running/Success_Rate/mean` and `/se` over all the rollouts so far;
 - every trial as it finishes (x = `trial`, from 1): `Trial/<metric>`, the average of
   that metric over the trial's rollouts (`Success_Rate`, `Return`, `Horizon`,
-  `Seconds`, `Simulator_Error_Rate`, `num_success`, `num_errors`, and
-  `Insertion/...` with `--insertion-report`), and `Running/<metric>/mean` and `/se`
+  `Seconds`, `Simulator_Error_Rate`, `num_success`, `num_errors`, `Failure/<reason>`
+  on the Square task, and `Insertion/...` with `--insertion-report`), and
+  `Running/<metric>/mean` and `/se`
   over the trials so far, the names `train_trials.py` uses. The trial's joined
   `SUCCESSFUL_ALL` and `FAILED_ALL` videos are sent too (`Video/...`, or
   `Video/trial_NN/...` with several trials; failures need `--keep-failures`);

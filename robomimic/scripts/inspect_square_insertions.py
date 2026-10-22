@@ -121,6 +121,19 @@ class Scene:
         return dict(nut_pos=np.array(d.xpos[self.nut_body]), nut_rot=np.array(d.xmat[self.nut_body]).reshape(3, 3),
                     eef=np.array(d.site_xpos[self.eef_site]) if self.eef_site is not None else np.full(3, np.nan))
 
+    def fingers_on_nut(self):
+        """How many fingers (not geoms) touch the nut at the current state."""
+        m, d, c = self.model, self.data, self.category
+        fingers = set()
+        for i in range(d.ncon):
+            contact = d.contact[i]
+            if contact.dist > 1e-3:
+                continue
+            a, b = int(contact.geom1), int(contact.geom2)
+            if {c[a], c[b]} == {"nut", "finger"}:
+                fingers.add(self.finger_of[int(m.geom_bodyid[b if c[b] == "finger" else a])])
+        return len(fingers)
+
     def read(self):
         """Poses and contact counts at the current state."""
         m, d, c = self.model, self.data, self.category
@@ -176,7 +189,9 @@ class SquareProbe:
     def read(self):
         from robomimic.utils import square_success
         pose = self.scene.poses()
-        return square_success.components(pose["nut_pos"], pose["nut_rot"], pose["eef"], self.scene.peg_pos, self.scene.table_z)
+        c = square_success.components(pose["nut_pos"], pose["nut_rot"], pose["eef"], self.scene.peg_pos, self.scene.table_z)
+        c["fingers_on_nut"] = self.scene.fingers_on_nut()  # so that "held" means a finger touches the nut, not that a hand is near
+        return c
 
 
 def probe_from_env(env):

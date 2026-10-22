@@ -83,6 +83,37 @@ def test_each_way_of_missing_the_rule_has_its_reason(changes, reason):
     assert reason in ss.REASONS
 
 
+def with_fingers(c, fingers):
+    return dict(scalar(c), fingers_on_nut=fingers)
+
+
+def test_held_means_a_finger_touches_the_nut_when_the_state_says_how_many_do():
+    over_post = state(height=.12, hand=.07)   # the hand is within 10 cm, as it is just after letting go of a nut on the post
+    assert ss.failure_reason(over_post) == "held_above_post"                      # no contact information: the distance proxy
+    assert ss.failure_reason(with_fingers(over_post, 0)) == "resting_on_post_top"  # open hand hovering over a nut on the post
+    assert ss.failure_reason(with_fingers(over_post, 1)) == "held_above_post"
+    assert ss.failure_reason(with_fingers(over_post, 2)) == "held_above_post"
+    loose = state(height=.07, hand=.07)
+    assert ss.failure_reason(with_fingers(loose, 0)) == "wedged_above_limit"
+    assert ss.failure_reason(with_fingers(state(height=.07, hand=.40), 1)) == "held_above_post"  # touching though the site is far
+    # contact does not matter for the other reasons
+    assert ss.failure_reason(with_fingers(state(hand=.03), 2)) == "gripper_not_released"
+    assert ss.failure_reason(with_fingers(state(dx=.06), 2)) == "beside_post"
+
+
+def test_a_nut_near_the_post_is_measured_by_its_distance_not_by_the_larger_offset():
+    assert ss.failure_reason(state(dx=.08, dy=.08)) == "far_from_post"      # 11.3 cm away
+    assert ss.failure_reason(state(dx=.06, dy=.06)) == "beside_post"        # 8.5 cm away
+    assert ss.failure_reason(state(dy=-.08)) == "beside_post"
+
+
+def test_every_reason_has_a_description_and_the_error_is_one_of_them():
+    assert set(ss.REASONS) == {"success", "gripper_not_released", "resting_on_post_top", "held_above_post", "wedged_above_limit",
+                               "beside_post", "far_from_post", "simulator_error"}
+    assert all(text for text in ss.REASONS.values())
+    assert "at the end" not in ss.REASONS["far_from_post"] and "never" not in ss.REASONS["far_from_post"]
+
+
 def test_the_reason_boundaries():
     assert ss.failure_reason(state(height=.0999, hand=.4)) == "wedged_above_limit"
     assert ss.failure_reason(state(height=.1001, hand=.4)) == "resting_on_post_top"
@@ -105,6 +136,9 @@ def test_the_tracker_reports_what_the_rollout_ended_in_and_what_came_closest():
     assert result["Failure_Reason"] == "far_from_post"      # the end of its video
     assert result["Closest_Reason"] == "beside_post" and result["Closest_Step"] == 1  # 6 cm off is nearer than 9 cm too high
     assert result["Final_Nut_Height_cm"] == pytest.approx(1.) and result["Final_XY_Offset_cm"] == pytest.approx(30.)
+    off_in_y = ss.RuleTracker()
+    off_in_y.update(scalar(state(dx=.03, dy=-.04)))
+    assert off_in_y.result()["Final_XY_Offset_cm"] == pytest.approx(5.)  # the distance, not either offset
     assert result["Final_Hand_Distance_cm"] == pytest.approx(40.) and result["Final_Tilt_deg"] == pytest.approx(0.)
     assert result["Rule_Mismatch_Steps"] == 0
     stays = ss.RuleTracker()
@@ -140,23 +174,34 @@ def test_reason_counts_only_count_records_that_have_one():
 @pytest.fixture(scope="module")
 def square():
     """A real NutAssemblySquare environment (robomimic wrapper), or skip."""
-    os.environ.setdefault("MUJOCO_GL", "disabled")
+    return make_square(hard_reset=False)
+
+
+def make_square(hard_reset):
+    """A real NutAssemblySquare environment (robomimic wrapper); the test is skipped only when robosuite or MuJoCo is not installed."""
     try:
-        import robomimic.utils.env_utils as EnvUtils
-        import robomimic.utils.obs_utils as ObsUtils
-        from robomimic.envs.env_base import EnvType
-        from robosuite.controllers import load_composite_controller_config
-        if ObsUtils.OBS_KEYS_TO_MODALITIES is None:
-            ObsUtils.initialize_obs_utils_with_obs_specs({"obs": {"low_dim": [], "rgb": []}})
-        env = EnvUtils.create_env(
-            EnvType.ROBOSUITE_TYPE, "NutAssemblySquare", render=False, render_offscreen=False, use_image_obs=False,
-            robots="Panda", controller_configs=load_composite_controller_config(controller="BASIC", robot="Panda"),
-            control_freq=20, ignore_done=True, reward_shaping=False, hard_reset=False, use_object_obs=True,
-            use_camera_obs=False, seed=0)
-        env.reset()
-    except Exception as exc:  # no robosuite, no MuJoCo, or no way to build the task here
-        pytest.skip("cannot build NutAssemblySquare: {}: {}".format(type(exc).__name__, exc))
+        import mujoco  # noqa: F401
+        import robosuite  # noqa: F401
+    except ImportError as exc:
+        pytest.skip("robosuite or MuJoCo is not installed: {}".format(exc))
+    import robomimic.utils.env_utils as EnvUtils
+    import robomimic.utils.obs_utils as ObsUtils
+    from robomimic.envs.env_base import EnvType
+    from robosuite.controllers import load_composite_controller_config
+    if ObsUtils.OBS_KEYS_TO_MODALITIES is None:
+        ObsUtils.initialize_obs_utils_with_obs_specs({"obs": {"low_dim": [], "rgb": []}})
+    env = EnvUtils.create_env(
+        EnvType.ROBOSUITE_TYPE, "NutAssemblySquare", render=False, render_offscreen=False, use_image_obs=False,
+        robots="Panda", controller_configs=load_composite_controller_config(controller="BASIC", robot="Panda"),
+        control_freq=20, ignore_done=True, reward_shaping=False, hard_reset=hard_reset, use_object_obs=True,
+        use_camera_obs=False, seed=0)
+    env.reset()
     return env
+
+
+@pytest.fixture(autouse=True)
+def no_display(monkeypatch):
+    monkeypatch.setenv("MUJOCO_GL", "disabled")
 
 
 def place(env, position, quat=(1., 0., 0., 0.)):
@@ -211,3 +256,58 @@ def test_a_real_rollout_reports_what_came_closest_and_agrees_with_the_environmen
     # without a probe nothing is added
     stats, *_ = helper.collect_episode(ZeroPolicy(), square, horizon=2, camera_names=["agentview"], video_skip=1)
     assert "Failure_Reason" not in stats
+
+
+@pytest.mark.parametrize("hand, expected", [(.03, False), (.0423, False), (.0426, True), (.067, True), (.25, True)])
+def test_the_release_condition_agrees_with_robosuite_for_a_hand_at_each_distance(square, hand, expected):
+    """Holding the handle (6 to 7 cm) does not block a success; a hand within 4.24 cm of the nut does."""
+    from robomimic.scripts.inspect_square_insertions import probe_from_env
+    square.reset()
+    sim = square.env
+    peg = np.array(sim.sim.data.body_xpos[sim.peg1_body_id])
+    probe = probe_from_env(square)
+    nut = np.array([peg[0], peg[1], sim.table_offset[2] + .01])
+    place(square, nut)
+    site = sim.robots[0].eef_site_id
+    site = site["right"] if isinstance(site, dict) else site
+    sim.sim.data.site_xpos[site] = nut + [0., 0., hand]  # read by robosuite's check and by the probe alike, until the next forward pass
+    c = scalar(probe.read())
+    assert bool(c["success"]) == bool(square.is_success()["task"]) == expected
+    assert ss.failure_reason(c) == ("success" if expected else "gripper_not_released")
+
+
+def test_a_nut_on_the_post_with_no_finger_on_it_is_resting_not_held(square):
+    from robomimic.scripts.inspect_square_insertions import probe_from_env
+    square.reset()
+    sim = square.env
+    peg = np.array(sim.sim.data.body_xpos[sim.peg1_body_id])
+    probe = probe_from_env(square)
+    place(square, [peg[0], peg[1], sim.table_offset[2] + .14])
+    c = scalar(probe.read())
+    assert c["fingers_on_nut"] == 0 and ss.failure_reason(c) == "resting_on_post_top"
+
+
+def test_the_probe_reads_the_new_simulator_when_robosuite_rebuilds_it_on_reset():
+    """With hard_reset robosuite makes a new simulator on every reset: a probe made before the reset would read the old one."""
+    from robomimic.scripts import rollout_best as helper
+    from robomimic.scripts.inspect_square_insertions import probe_from_env
+    env = make_square(hard_reset=True)
+
+    class ZeroPolicy:
+        policy = SimpleNamespace(global_config=SimpleNamespace(use_goals=False))
+
+        def start_episode(self):
+            pass
+
+        def __call__(self, ob, goal=None):
+            return np.zeros(7)
+
+    old = env.env.sim
+    env.render = lambda **kwargs: np.zeros((8, 8, 3), np.uint8)
+    stats, trajectory, initial, frames = helper.collect_episode(
+        ZeroPolicy(), env, horizon=3, camera_names=["agentview"], video_skip=1, probe_factory=probe_from_env)
+    sim = env.env
+    assert sim.sim is not old  # the reset really built a new simulator
+    nut_z = sim.sim.data.body_xpos[sim.obj_body_id["SquareNut"]][2]
+    assert stats["Final_Nut_Height_cm"] / 100 == pytest.approx(nut_z - sim.table_offset[2], abs=1e-9)
+    assert stats["Rule_Mismatch_Steps"] == 0

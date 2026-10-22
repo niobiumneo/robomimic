@@ -63,7 +63,7 @@ INDEX_FIELDS = ("clip", "rollout", "seed", "status", "file", "start_seconds", "d
 ROLLOUT_FIELDS = ("rollout", "seed", "status", "success", "return", "horizon", "seconds", "error", "video")
 # What each rollout of the Square task ended in and what came closest to success (see robomimic.utils.square_success).
 REASON_FIELDS = ("Failure_Reason", "Final_Nut_Height_cm", "Final_XY_Offset_cm", "Final_Hand_Distance_cm", "Final_Tilt_deg",
-                 "Closest_Reason", "Closest_Step")
+                 "Closest_Reason", "Closest_Step", "Rule_Mismatch_Steps")
 WANDB_VIDEOS = ("all", "joined", "none")
 DEFAULT_WANDB_VIDEOS = "all"
 
@@ -116,9 +116,12 @@ def trial_metrics(records, insertion=None):
     values["Simulator_Error_Rate"] = sum(record["status"] == "errors" for record in records) / len(records)
     values["num_success"] = sum(record["status"] == "successful" for record in records)
     values["num_errors"] = sum(record["status"] == "errors" for record in records)
-    for reason, count in reason_counts(records).items():
-        if reason != "success":
-            values["Failure/" + reason] = count / len(records)  # the share of the trial's rollouts that failed this way
+    followed = [record for record in records if record.get("Failure_Reason") is not None]
+    if followed:  # a trial whose rollouts were not followed has no such numbers, rather than zeros
+        counts = reason_counts(followed)
+        for reason in REASONS:
+            if reason != "success":
+                values["Failure/" + reason] = counts.get(reason, 0) / len(followed)  # share of the rollouts that ended this way
     if insertion is not None:
         from robomimic.scripts import inspect_square_insertions as insertions
         values.update(insertions.logged_values(insertion[1], prefix="Insertion/"))
@@ -126,8 +129,8 @@ def trial_metrics(records, insertion=None):
 
 
 def trial_value(row, name):
-    """A trial's number; a way of failing that did not happen in the trial is a share of 0, not a missing number."""
-    return row.get(name, 0. if name.startswith("Failure/") else None)
+    """A trial's number, or None if the trial has none (see trial_metrics)."""
+    return row.get(name)
 
 
 def across_trials(rows):
@@ -168,9 +171,13 @@ def summary_fields(rows, records):
         for stat, value in describe([record.get(key) for record in records]).items():
             if value is not None:
                 values["Pooled/{}/{}".format(metric_name(key), stat)] = value
-    for reason, count in reason_counts(records).items():
-        if reason != "success":
-            values["Pooled/Failure/" + reason] = count / len(records)
+    followed = [record for record in records if record.get("Failure_Reason") is not None]
+    if followed:
+        counts = reason_counts(followed)
+        for reason in REASONS:
+            if reason != "success":
+                values["Pooled/Failure/" + reason] = counts.get(reason, 0) / len(followed)
+        values["Pooled/Rule_Mismatch_Steps"] = sum(record.get("Rule_Mismatch_Steps", 0) for record in followed)
     low, high = wilson_interval(successes, len(records))
     if low is not None:
         values["Pooled/Success_Rate/ci95_low"], values["Pooled/Success_Rate/ci95_high"] = low, high
@@ -208,9 +215,12 @@ def print_failures(records, title="Why the rollouts that did not succeed did not
         print("\nThe reasons are unreliable here: the rule as written disagreed with the environment's own success on "
               "{} steps.".format(mismatches), flush=True)
     failed = [record for record in records if record.get("Failure_Reason") not in (None, "success")]
+    unsuccessful = [record for record in records if record["status"] != "successful"]
     if not failed:
         return
-    print("\n{} ({} of {})".format(title, len(failed), len(records)), flush=True)
+    missing = sum(record.get("Failure_Reason") is None for record in unsuccessful)
+    print("\n{} ({} of {} rollouts{})".format(
+        title, len(unsuccessful), len(records), "; {} without a reason".format(missing) if missing else ""), flush=True)
     counts = reason_counts(failed)
     for reason in sorted(counts, key=lambda name: -counts[name]):
         group = [record for record in failed if record["Failure_Reason"] == reason]
@@ -502,7 +512,7 @@ def collect_episode(policy, env, horizon, camera_names, video_skip, terminate_on
                 try:
                     closest.update(probe.read(), current["task"])
                 except Exception as exc:
-                    probe = None
+                    probe, closest = None, RuleTracker()  # a rollout followed only in part has no reason, not a stale one
                     warn_once("Failure reasons stopped ({}: {}); the rollouts are unaffected.".format(type(exc).__name__, exc))
             # Always include the success / terminal frame even when skipped.
             if step % video_skip == 0 or success or done or step == horizon - 1:
@@ -523,6 +533,8 @@ def collect_episode(policy, env, horizon, camera_names, video_skip, terminate_on
     stats.update({key + "_Success_Rate": float(value)
                   for key, value in success_metrics.items() if key != "task"})
     stats.update(closest.result())
+    if error and "Failure_Reason" in stats:
+        stats["Failure_Reason"] = "simulator_error"  # a rollout that ended in an error is not a success whatever the nut did before
     return stats, {k: np.asarray(v) for k, v in trajectory.items()}, initial_state, frames
 
 

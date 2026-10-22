@@ -440,6 +440,8 @@ class FakeWandb:
         return SimpleNamespace(columns=list(columns), data=[list(row) for row in data])
 
     def Video(self, data_or_path, caption=None, fps=None, format=None):
+        if not Path(data_or_path).is_file():  # the real one reads the file when it is made
+            raise FileNotFoundError(2, "No such file or directory", str(data_or_path))
         return SimpleNamespace(video=str(data_or_path), format=format, caption=caption)
 
 
@@ -451,6 +453,11 @@ def install_wandb(monkeypatch, **kwargs):
 
 def logged(run, key):
     return [row[key] for row in run.rows if key in row]
+
+
+def rollout_numbers(run):
+    """The rollout number of each logged rollout (a rollout's video is sent as a second row with the same number)."""
+    return [row["rollout"] for row in run.rows if "Rollout/Success" in row]
 
 
 def test_the_success_rate_comes_with_a_wilson_interval():
@@ -571,7 +578,7 @@ def test_the_wandb_run_follows_every_rollout_and_gets_the_results(tmp_path, monk
     assert ("trial", {}) in run.definitions and ("Trial/*", {"step_metric": "trial"}) in run.definitions
     assert ("Running/*", {"step_metric": "trial"}) in run.definitions
     # one point per rollout, as it finishes, with the success so far
-    assert logged(run, "rollout") == [0, 1, 2, 3, 4, 5] and logged(run, "Rollout/Trial") == [1] * 6
+    assert rollout_numbers(run) == [0, 1, 2, 3, 4, 5] and logged(run, "Rollout/Trial") == [1] * 6
     assert logged(run, "Rollout/Success") == [1., 0., 1., 0., 0., 1.]
     assert logged(run, "Rollout/Simulator_Error") == [0., 0., 0., 1., 0., 0.]
     assert logged(run, "Rollout/Horizon") == [4, 6, 3, 2, 6, 5]
@@ -631,7 +638,7 @@ def test_trials_are_logged_with_their_running_mean_and_standard_error(tmp_path, 
     fake = install_wandb(monkeypatch)
     output, summary = run_scripted(tmp_path, monkeypatch, wandb_mode="online", wandb_project="p", n_rollouts=6, **TWO_TRIALS)
     run = fake.run
-    assert logged(run, "rollout") == list(range(12)) and logged(run, "Rollout/Trial") == [1] * 6 + [2] * 6
+    assert rollout_numbers(run) == list(range(12)) and logged(run, "Rollout/Trial") == [1] * 6 + [2] * 6
     assert logged(run, "trial") == [1, 2] and logged(run, "Trial/Success_Rate") == [.5, 1.]
     assert logged(run, "Running/Success_Rate/mean") == pytest.approx([.5, .75])
     assert logged(run, "Running/Success_Rate/se") == pytest.approx([.25])  # one trial has no spread yet; two do
@@ -722,12 +729,22 @@ def test_a_wandb_failure_never_costs_the_evaluation(tmp_path, monkeypatch, capsy
     assert "W&B tracking stopped (ConnectionError: no network)" in text and text.count("W&B tracking stopped") == 1
 
 
-def test_losing_the_connection_midway_stops_only_the_tracking(tmp_path, monkeypatch, capsys):
-    fake = install_wandb(monkeypatch, run=FakeRun(fail_log_at=3))
-    output, summary = run_scripted(tmp_path, monkeypatch, wandb_mode="online", wandb_project="p", no_stitch=True)
-    assert summary["n_rollouts_completed"] == 6 and len(logged(fake.run, "rollout")) == 2
-    assert fake.run.finished == 0 and "rollouts" not in fake.run.rows[-1]
-    assert capsys.readouterr().out.count("W&B tracking stopped (ConnectionError: lost the connection)") == 1
+def test_losing_the_connection_midway_stops_only_the_sending_and_the_run_stays_open_to_the_end(tmp_path, monkeypatch, capsys):
+    fake = install_wandb(monkeypatch, run=FakeRun(fail_log_at=5))  # the 5th row: each rollout is a row of numbers and a row with its video
+    open_at_start = []
+
+    class Watches(FakePolicy):
+        def start_episode(self):
+            open_at_start.append(fake.run.finished is None)  # W&B must not show the run as finished while rollouts go on
+            super().start_episode()
+
+    output, summary = run_scripted(tmp_path, monkeypatch, policy=Watches(), wandb_mode="online", wandb_project="p", no_stitch=True)
+    assert summary["n_rollouts_completed"] == 6 and len(rollout_numbers(fake.run)) == 2
+    assert open_at_start == [True] * 6
+    assert fake.run.finished == 1 and "rollouts" not in fake.run.rows[-1]  # failed: the results are incomplete
+    text = capsys.readouterr().out
+    assert text.count("W&B tracking stopped (ConnectionError: lost the connection)") == 1
+    assert "stays open until the evaluation ends and is then marked failed" in text
     assert len(list((output / "rollouts.csv").read_text().splitlines())) == 7
 
 
@@ -748,7 +765,7 @@ def test_an_evaluation_that_breaks_marks_the_wandb_run_failed(tmp_path, monkeypa
     fake = install_wandb(monkeypatch)
     with pytest.raises(ValueError, match="policy broke"):
         run_scripted(tmp_path, monkeypatch, policy=Breaks(), wandb_mode="online", wandb_project="p", no_stitch=True)
-    assert fake.run.finished == 1 and logged(fake.run, "rollout") == [0]
+    assert fake.run.finished == 1 and rollout_numbers(fake.run) == [0]
 
 
 @pytest.mark.parametrize("step", ["write_rollout_table", "stitch_videos", "print_results", "write_summary"])
@@ -901,13 +918,13 @@ def test_the_command_line_has_the_wandb_trial_and_report_options(monkeypatch, ca
 def test_a_wandb_failure_while_sending_the_results_never_costs_the_evaluation(tmp_path, monkeypatch, capsys, failure):
     fake = install_wandb(monkeypatch, **failure)
     output, summary = run_scripted(tmp_path, monkeypatch, wandb_mode="online", wandb_project="p")
-    assert summary["n_rollouts_completed"] == 6 and fake.run.finished == 0
+    assert summary["n_rollouts_completed"] == 6 and fake.run.finished == 1
     text = capsys.readouterr().out
     assert text.count("W&B tracking stopped") == 1
     assert "Results over 6 rollouts" in text and "Videos, all trajectories, and summary saved in" in text  # printing went on
     for name in ("summary.json", "rollouts.csv", "rollouts.hdf5", "SUCCESSFUL_ALL.mp4"):
         assert (output / name).exists()
-    assert len(logged(fake.run, "rollout")) == 6 and logged(fake.run, "trial") == [1]  # what had gone up stays
+    assert len(rollout_numbers(fake.run)) == 6 and logged(fake.run, "trial") == [1]  # what had gone up stays
 
 
 class GraspEnv(ScriptedEnv):
@@ -930,3 +947,39 @@ def test_another_success_measure_is_saved_logged_and_averaged_per_trial(tmp_path
         rows = list(csv.DictReader(stream))
     assert [r["grasp_Success_Rate"] for r in rows] == ["1.0", "1.0", "1.0", "0.0", "0.0", "1.0"]
     assert summary["metrics"]["grasp_Success_Rate"] == pytest.approx(4 / 6)
+
+
+def test_every_clip_is_sent_from_its_own_trial_folder(tmp_path, monkeypatch, capsys):
+    """With several trials the clips are in trial_NN folders: looking in the output folder made the first upload fail,
+    which closed the run while the evaluation went on."""
+    fake = install_wandb(monkeypatch)
+    output, summary = run_scripted(tmp_path, monkeypatch, wandb_mode="online", wandb_project="p", no_stitch=True,
+                                   n_rollouts=6, **TWO_TRIALS)
+    clips = logged(fake.run, "Rollout/Video")
+    expected = [str(output / folder / record["video"]) for folder, trial in (("trial_01", 0), ("trial_02", 1))
+                for record in json.loads((output / folder / "summary.json").read_text())["episodes"]]
+    assert [c.video for c in clips] == expected and len(clips) == 12 and all(Path(c.video).is_file() for c in clips)
+    assert clips[7].caption == "trial 2 rollout 1 | successful | seed 10007"
+    assert fake.run.finished == 0 and "W&B tracking stopped" not in capsys.readouterr().out
+    assert logged(fake.run, "trial") == [1, 2]
+
+
+def test_a_video_that_cannot_be_sent_is_skipped_and_nothing_else_is_lost(tmp_path, monkeypatch, capsys):
+    fake = install_wandb(monkeypatch)
+    real_video = fake.Video
+
+    def refuses_one(data_or_path, caption=None, fps=None, format=None):
+        if "rollout_002" in str(data_or_path):
+            raise OSError("cannot read this clip")
+        return real_video(data_or_path, caption=caption, fps=fps, format=format)
+
+    fake.Video = refuses_one
+    output, summary = run_scripted(tmp_path, monkeypatch, wandb_mode="online", wandb_project="p", no_stitch=True)
+    run = fake.run
+    assert rollout_numbers(run)[:6] == [0, 1, 2, 3, 4, 5] and len(logged(run, "Rollout/Success")) == 6  # every rollout's numbers
+    assert len(logged(run, "Rollout/Video")) == 5  # every clip but the one that failed
+    assert logged(run, "trial") == [1] and run.finished == 0  # the rest was sent, and the run did not end failed
+    text = capsys.readouterr().out
+    assert "W&B could not take the video of trial 1 rollout 2 (OSError: cannot read this clip); it is skipped." in text
+    assert "1 videos could not be sent to W&B; they are in the output directory." in text and "tracking stopped" not in text
+    assert (output / summary["episodes"][2]["video"]).is_file()

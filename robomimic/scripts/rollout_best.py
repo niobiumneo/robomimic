@@ -37,6 +37,7 @@ import json
 import math
 import os
 import random
+import statistics
 import subprocess
 import time
 from datetime import datetime
@@ -52,6 +53,7 @@ import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.torch_utils as TorchUtils
 # select_checkpoint lives in the standard-library trial_metrics module so the
 # train_trials launcher can choose the checkpoint without importing torch.
+from robomimic.utils.square_success import REASONS, RuleTracker, reason_counts
 from robomimic.utils.trial_metrics import describe, resolve_wandb_mode, seed_environment, select_checkpoint
 
 # Outcomes whose clips are joined into one video, in rollout order. A failure
@@ -59,6 +61,9 @@ from robomimic.utils.trial_metrics import describe, resolve_wandb_mode, seed_env
 COMPILATIONS = (("SUCCESSFUL_ALL", ("successful",)), ("FAILED_ALL", ("failed", "errors")))
 INDEX_FIELDS = ("clip", "rollout", "seed", "status", "file", "start_seconds", "duration_seconds")
 ROLLOUT_FIELDS = ("rollout", "seed", "status", "success", "return", "horizon", "seconds", "error", "video")
+# What each rollout of the Square task ended in and what came closest to success (see robomimic.utils.square_success).
+REASON_FIELDS = ("Failure_Reason", "Final_Nut_Height_cm", "Final_XY_Offset_cm", "Final_Hand_Distance_cm", "Final_Tilt_deg",
+                 "Closest_Reason", "Closest_Step")
 WANDB_VIDEOS = ("all", "joined", "none")
 DEFAULT_WANDB_VIDEOS = "all"
 
@@ -84,11 +89,16 @@ def rollout_row(record):
 def write_rollout_table(output, records):
     """rollouts.csv: one row per rollout, with the extra success metrics some tasks report."""
     extra = sorted({key for record in records for key in record if key.endswith("_Success_Rate") and key != "Success_Rate"})
+    extra += reason_fields(records)
     with (output / "rollouts.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(ROLLOUT_FIELDS) + extra)
         writer.writeheader()
         for record in records:
             writer.writerow(dict(rollout_row(record), **{key: record.get(key) for key in extra}))
+
+
+def reason_fields(records):
+    return [field for field in REASON_FIELDS if any(field in record for record in records)]
 
 
 def metric_keys(records):
@@ -106,22 +116,33 @@ def trial_metrics(records, insertion=None):
     values["Simulator_Error_Rate"] = sum(record["status"] == "errors" for record in records) / len(records)
     values["num_success"] = sum(record["status"] == "successful" for record in records)
     values["num_errors"] = sum(record["status"] == "errors" for record in records)
+    for reason, count in reason_counts(records).items():
+        if reason != "success":
+            values["Failure/" + reason] = count / len(records)  # the share of the trial's rollouts that failed this way
     if insertion is not None:
         from robomimic.scripts import inspect_square_insertions as insertions
         values.update(insertions.logged_values(insertion[1], prefix="Insertion/"))
     return {key: value for key, value in values.items() if value is not None}
 
 
+def trial_value(row, name):
+    """A trial's number; a way of failing that did not happen in the trial is a share of 0, not a missing number."""
+    return row.get(name, 0. if name.startswith("Failure/") else None)
+
+
 def across_trials(rows):
     """Mean, sample SD, SE and n of each metric over the trials (one row of ``trial_metrics`` each)."""
-    return {name: describe([row.get(name) for row in rows]) for name in sorted({name for row in rows for name in row})}
+    return {name: describe([trial_value(row, name) for row in rows]) for name in sorted({name for row in rows for name in row})}
 
 
 def trial_values(trial, rows):
     """What the finished trial (the last of ``rows``) adds to W&B: its numbers, and their mean and SE over the trials so far."""
     values = {"trial": trial}
-    for name, value in rows[-1].items():
-        stats = describe([row.get(name) for row in rows])
+    for name in sorted({name for row in rows for name in row}):
+        value = trial_value(rows[-1], name)
+        if value is None:
+            continue
+        stats = describe([trial_value(row, name) for row in rows])
         values["Trial/" + name] = value
         values["Running/{}/mean".format(name)] = stats["mean"]
         if stats["se"] is not None:
@@ -147,6 +168,9 @@ def summary_fields(rows, records):
         for stat, value in describe([record.get(key) for record in records]).items():
             if value is not None:
                 values["Pooled/{}/{}".format(metric_name(key), stat)] = value
+    for reason, count in reason_counts(records).items():
+        if reason != "success":
+            values["Pooled/Failure/" + reason] = count / len(records)
     low, high = wilson_interval(successes, len(records))
     if low is not None:
         values["Pooled/Success_Rate/ci95_low"], values["Pooled/Success_Rate/ci95_high"] = low, high
@@ -175,6 +199,31 @@ def print_results(summary, records, output, wandb_url=None, title="Results"):
           flush=True)
     if wandb_url:
         print("  W&B: {}".format(wandb_url), flush=True)
+
+
+def print_failures(records, title="Why the rollouts that did not succeed did not"):
+    """For the Square task: what each unsuccessful rollout ended in, which is what the end of its video shows."""
+    mismatches = sum(record.get("Rule_Mismatch_Steps", 0) for record in records)
+    if mismatches:
+        print("\nThe reasons are unreliable here: the rule as written disagreed with the environment's own success on "
+              "{} steps.".format(mismatches), flush=True)
+    failed = [record for record in records if record.get("Failure_Reason") not in (None, "success")]
+    if not failed:
+        return
+    print("\n{} ({} of {})".format(title, len(failed), len(records)), flush=True)
+    counts = reason_counts(failed)
+    for reason in sorted(counts, key=lambda name: -counts[name]):
+        group = [record for record in failed if record["Failure_Reason"] == reason]
+        middle = lambda key: statistics.median(record[key] for record in group)
+        print("  {:<22} {:>3}  {}".format(reason, len(group), REASONS.get(reason, "")), flush=True)
+        print("  {:<22} {:>3}  at the end: nut {:.1f} cm above the table and {:.1f} cm off the post, hand {:.1f} cm "
+              "from the nut, tilt {:.0f} deg (medians)".format(
+                  "", "", middle("Final_Nut_Height_cm"), middle("Final_XY_Offset_cm"), middle("Final_Hand_Distance_cm"),
+                  middle("Final_Tilt_deg")), flush=True)
+        nearer = sum(record["Closest_Reason"] != reason for record in group)
+        if nearer:
+            print("  {:<22} {:>3}  ({} of them came closest to the rule in another way earlier: see Closest_Reason in "
+                  "rollouts.csv)".format("", "", nearer), flush=True)
 
 
 def print_trials(trials, rows, records, url=None):
@@ -273,6 +322,9 @@ class WandbTracker:
             for key in metric_keys([record]):
                 if key.endswith("_Success_Rate") and key != "Success_Rate":
                     values["Rollout/" + key] = record[key]
+            for key in REASON_FIELDS[1:5]:
+                if key in record:
+                    values["Rollout/" + key] = record[key]
             stats = describe([r["Success_Rate"] for r in records])
             values["Rollout/Running/Success_Rate/mean"] = stats["mean"]
             if stats["se"] is not None:
@@ -287,8 +339,10 @@ class WandbTracker:
             try:
                 self.run.log({"rollout": number, "Rollout/Video": self.wandb.Video(
                     str(Path(folder) / record["video"]), format="mp4",
-                    caption="trial {} rollout {} | {} | seed {}".format(trial, record["rollout"], record["status"], record["seed"]))},
-                    step=self.step)
+                    caption="trial {} rollout {} | {}{} | seed {}".format(
+                        trial, record["rollout"], record["status"],
+                        " ({})".format(record["Failure_Reason"]) if record.get("Failure_Reason") not in (None, "success") else "",
+                        record["seed"]))}, step=self.step)
             except Exception as exc:
                 self.videos_lost += 1
                 if self.videos_lost <= 3:
@@ -322,8 +376,9 @@ class WandbTracker:
             run.log({"trials": wandb.Table(columns=["trial", "seed", "num_rollouts"] + names, data=[
                 [trial["number"], trial["seed"], len(trial["records"])] + [row.get(name) for name in names]
                 for trial, row in zip(trials, rows)])}, step=self.step)
-            run.log({"rollouts": wandb.Table(columns=["trial"] + list(ROLLOUT_FIELDS), data=[
-                [trial["number"]] + [rollout_row(record)[field] for field in ROLLOUT_FIELDS]
+            extra = reason_fields(records)
+            run.log({"rollouts": wandb.Table(columns=["trial"] + list(ROLLOUT_FIELDS) + extra, data=[
+                [trial["number"]] + [rollout_row(record)[field] for field in ROLLOUT_FIELDS] + [record.get(field) for field in extra]
                 for trial in trials for record in trial["records"]])}, step=self.step)
             reports = [(trial["number"], trial["insertion"]) for trial in trials if trial["insertion"] is not None]
             if reports:
@@ -394,15 +449,33 @@ def insertion_report(output):
         return None
 
 
-def collect_episode(policy, env, horizon, camera_names, video_skip, terminate_on_success=True):
+_WARNED = set()
+
+
+def warn_once(message):
+    if message not in _WARNED:
+        _WARNED.add(message)
+        print(message, flush=True)
+
+
+def collect_episode(policy, env, horizon, camera_names, video_skip, terminate_on_success=True, probe_factory=None):
     """Collect aligned pre-action states, post-action states, and video frames.
 
     Reset recurrent policy state for each independent rollout. Success uses the
     environment's task criterion and stops the rollout at its first success,
     matching the Square training template. No force injection is required.
+
+    With ``probe_factory`` (Square task) the pieces of the success rule are read after every step, and the stats
+    say which came closest to a success and why it was not one (see robomimic.utils.square_success).
     """
     policy.start_episode()
     obs = env.reset()
+    probe, closest = None, RuleTracker()
+    if probe_factory is not None:
+        try:
+            probe = probe_factory(env)  # after the reset: robosuite may have built a new simulator
+        except Exception as exc:
+            warn_once("Failure reasons are not available ({}: {}); the rollouts are unaffected.".format(type(exc).__name__, exc))
     initial_state = env.get_state()
     state = initial_state
     trajectory = {k: [] for k in ("states", "next_states", "actions", "rewards", "dones")}
@@ -425,6 +498,12 @@ def collect_episode(policy, env, horizon, camera_names, video_skip, terminate_on
             for key, value in current.items():
                 success_metrics[key] = success_metrics.get(key, False) or bool(value)
             success = success_metrics["task"]
+            if probe is not None:
+                try:
+                    closest.update(probe.read(), current["task"])
+                except Exception as exc:
+                    probe = None
+                    warn_once("Failure reasons stopped ({}: {}); the rollouts are unaffected.".format(type(exc).__name__, exc))
             # Always include the success / terminal frame even when skipped.
             if step % video_skip == 0 or success or done or step == horizon - 1:
                 frames.append(np.concatenate([
@@ -443,6 +522,7 @@ def collect_episode(policy, env, horizon, camera_names, video_skip, terminate_on
              "error": error}
     stats.update({key + "_Success_Rate": float(value)
                   for key, value in success_metrics.items() if key != "task"})
+    stats.update(closest.result())
     return stats, {k: np.asarray(v) for k, v in trajectory.items()}, initial_state, frames
 
 
@@ -577,7 +657,7 @@ def evaluate_trial(ctx, folder, number, first_seed, offset):
             started = time.time()
             stats, trajectory, initial, frames = collect_episode(
                 ctx.policy, ctx.env, ctx.horizon, args.camera_names, args.video_skip,
-                terminate_on_success=ctx.terminate_on_success)
+                terminate_on_success=ctx.terminate_on_success, probe_factory=ctx.probe_factory)
             stats["time"] = time.time() - started
             name = "demo_{}".format(index)
             save_trajectory(data, name, trajectory, initial, stats, seed)
@@ -736,8 +816,12 @@ def run(args):
              "video_skip": args.video_skip, "fps": args.fps, "keep_failures": bool(args.keep_failures),
              "output_dir": str(output), "insertion_report": insertion_requested, "wandb_videos": wandb_videos},
             videos=wandb_videos)
+    probe_factory = None
+    if env_name is not None and "NutAssemblySquare" in env_name:
+        from robomimic.scripts.inspect_square_insertions import probe_from_env as probe_factory
     ctx = SimpleNamespace(args=args, policy=policy, env=env, horizon=horizon, checkpoint=checkpoint, selection=selection,
                           tracker=tracker, insertion=insertion_requested, env_name=env_name or "unknown", records=[],
+                          probe_factory=probe_factory,
                           terminate_on_success=getattr(config.experiment.rollout, "terminate_on_success", True))
     trials, rows = [], []
     finished = False
@@ -756,6 +840,7 @@ def run(args):
                 tracker.log_trial(index + 1, rows, folder, trial["summary"], n_trials)
                 print_results(trial["summary"], trial["records"], folder, tracker.url if n_trials == 1 else None,
                               "Results" if n_trials == 1 else "Trial {}".format(index + 1))
+                print_failures(trial["records"])
         finally:
             # EnvBase has no close method; robosuite's wrapped simulator does.
             base = getattr(env, "unwrapped", env)
@@ -776,6 +861,7 @@ def run(args):
                                   "success_rate_ci95": list(wilson_interval(successes, len(ctx.records)))}}
             write_trial_files(output, trials, rows, ctx, summary)
             print_trials(trials, rows, ctx.records, tracker.url)
+            print_failures(ctx.records, "Why the rollouts of all trials that did not succeed did not")
         tracker.publish(trials, rows, ctx.records, output)
         print("Videos, all trajectories, and summary saved in {}".format(output), flush=True)
         finished = True

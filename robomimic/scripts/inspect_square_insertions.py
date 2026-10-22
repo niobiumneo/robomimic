@@ -115,11 +115,16 @@ class Scene:
         except Exception:
             return dict(SQUARE_NUT)
 
+    def poses(self):
+        """The nut's position and rotation and the grip site's position at the current state."""
+        d = self.data
+        return dict(nut_pos=np.array(d.xpos[self.nut_body]), nut_rot=np.array(d.xmat[self.nut_body]).reshape(3, 3),
+                    eef=np.array(d.site_xpos[self.eef_site]) if self.eef_site is not None else np.full(3, np.nan))
+
     def read(self):
         """Poses and contact counts at the current state."""
         m, d, c = self.model, self.data, self.category
-        out = dict(nut_pos=np.array(d.xpos[self.nut_body]), nut_rot=np.array(d.xmat[self.nut_body]).reshape(3, 3),
-                   eef=np.array(d.site_xpos[self.eef_site]) if self.eef_site is not None else np.full(3, np.nan))
+        out = self.poses()
         counts = dict(nut_table=0, nut_peg=0, finger_table=0, hand_table=0, arm_table=0)
         fingers, force, finger_table_force = set(), 0.0, 0.0
         wrench = np.zeros(6)
@@ -160,6 +165,26 @@ def scene_from_env(env):
         sim.forward()
     site = env.env.robots[0].eef_site_id
     return Scene(model, data, set_state, env.env.table_offset[2], site["right"] if isinstance(site, dict) else site)
+
+
+class SquareProbe:
+    """Reads the pieces of robosuite's success rule (see square_success) from a live environment, after each step."""
+
+    def __init__(self, scene):
+        self.scene = scene
+
+    def read(self):
+        from robomimic.utils import square_success
+        pose = self.scene.poses()
+        return square_success.components(pose["nut_pos"], pose["nut_rot"], pose["eef"], self.scene.peg_pos, self.scene.table_z)
+
+
+def probe_from_env(env):
+    """A SquareProbe for a robomimic environment around robosuite's NutAssemblySquare.
+
+    robosuite may build a new simulator when it resets, so make the probe after each reset.
+    """
+    return SquareProbe(scene_from_env(env))
 
 
 def extract(scene, states):

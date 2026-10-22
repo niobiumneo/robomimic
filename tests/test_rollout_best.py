@@ -992,3 +992,110 @@ def test_a_video_that_cannot_be_sent_is_skipped_and_nothing_else_is_lost(tmp_pat
     assert "W&B could not take the video of trial 1 rollout 2 (OSError: cannot read this clip); it is skipped." in text
     assert "1 videos could not be sent to W&B; they are in the output directory." in text and "tracking stopped" not in text
     assert (output / summary["episodes"][2]["video"]).is_file()
+
+
+# ---- why the rollouts that did not succeed did not (Square task) ----------------------------------------------------
+
+def reasons_probe(monkeypatch, script):
+    """Stands in for the probe of the success rule: the scripted environment's rollouts end beside, on top of or at the post."""
+    from robomimic.scripts import inspect_square_insertions as insertions
+    from robomimic.utils import square_success as ss
+    peg, table = np.array([.23, .10, .85]), .82
+
+    def components(dx=0., height=.01, hand=.40):
+        nut = np.array([peg[0] + dx, peg[1], table + height])
+        return ss.components(nut, np.eye(3), nut + [0., 0., hand], peg, table)
+
+    def make(env):
+        class Probe:
+            def read(self):
+                kind, steps = script[env.episode]
+                if kind == "success":
+                    return components() if env.step_index >= steps else components(dx=.1)
+                return components(height=.14, hand=.35) if kind == "fail" else components(dx=-.3)
+        return Probe()
+
+    monkeypatch.setattr(insertions, "probe_from_env", make)
+
+
+def test_every_rollout_of_the_square_task_says_why_it_did_not_succeed(tmp_path, monkeypatch, capsys):
+    reasons_probe(monkeypatch, SCRIPT)
+    output, summary = run_scripted(tmp_path, monkeypatch, env_name="NutAssemblySquare", no_stitch=True)
+    episodes = summary["episodes"]
+    assert [e["Failure_Reason"] for e in episodes] == [
+        "success", "resting_on_post_top", "success", "far_from_post", "resting_on_post_top", "success"]
+    assert [e["Closest_Reason"] for e in episodes] == [
+        "success", "resting_on_post_top", "success", "far_from_post", "resting_on_post_top", "success"]
+    assert episodes[1]["Final_Nut_Height_cm"] == pytest.approx(14.) and episodes[1]["Final_Hand_Distance_cm"] == pytest.approx(35.)
+    assert all(e["Rule_Mismatch_Steps"] == 0 for e in episodes)
+    with (output / "rollouts.csv").open() as stream:
+        rows = list(csv.DictReader(stream))
+    assert list(rows[0])[-7:] == list(helper.REASON_FIELDS) and rows[1]["Failure_Reason"] == "resting_on_post_top"
+    assert float(rows[1]["Final_Nut_Height_cm"]) == pytest.approx(14.)
+    text = capsys.readouterr().out
+    assert "Why the rollouts that did not succeed did not (3 of 6)" in text
+    assert "resting_on_post_top      2  the nut sits on the top or rim of the post, 10 cm or more above the table" in text
+    assert "far_from_post            1  the nut never came within 10 cm of the post" in text
+    assert "at the end: nut 14.0 cm above the table and 0.0 cm off the post, hand 35.0 cm from the nut, tilt 0 deg (medians)" in text
+
+
+def test_the_reasons_are_logged_per_rollout_per_trial_and_pooled(tmp_path, monkeypatch):
+    fake = install_wandb(monkeypatch)
+    reasons_probe(monkeypatch, SCRIPT + ALL_SUCCEED)
+    output, summary = run_scripted(tmp_path, monkeypatch, env_name="NutAssemblySquare", wandb_mode="online", wandb_project="p",
+                                   no_stitch=True, n_rollouts=6, **TWO_TRIALS)
+    run = fake.run
+    assert logged(run, "Rollout/Final_Nut_Height_cm") == [pytest.approx(h) for h in (1, 14, 1, 1, 14, 1) + (1,) * 6]
+    for key in ("Final_XY_Offset_cm", "Final_Hand_Distance_cm", "Final_Tilt_deg"):
+        assert len(logged(run, "Rollout/" + key)) == 12
+    # a way of failing is a share of the trial's rollouts; a trial without it has 0, which the average over trials counts
+    assert logged(run, "Trial/Failure/resting_on_post_top") == [pytest.approx(2 / 6), 0.]
+    assert logged(run, "Trial/Failure/far_from_post") == [pytest.approx(1 / 6), 0.]
+    assert logged(run, "Running/Failure/resting_on_post_top/mean") == [pytest.approx(2 / 6), pytest.approx(1 / 6)]
+    assert run.summary["Summary/Failure/resting_on_post_top/mean"] == pytest.approx(1 / 6)
+    assert run.summary["Summary/Failure/resting_on_post_top/n"] == 2  # both trials count, the second as 0
+    assert run.summary["Pooled/Failure/resting_on_post_top"] == pytest.approx(2 / 12)
+    assert summary["across_trials"]["Failure/far_from_post"]["mean"] == pytest.approx(1 / 12)
+    (table,) = logged(run, "rollouts")
+    assert table.columns[-7:] == list(helper.REASON_FIELDS) and table.data[1][table.columns.index("Failure_Reason")] == "resting_on_post_top"
+    clips = logged(run, "Rollout/Video")
+    assert clips[1].caption == "trial 1 rollout 1 | failed (resting_on_post_top) | seed 10001"
+    assert clips[0].caption == "trial 1 rollout 0 | successful | seed 10000"
+
+
+def test_reasons_that_disagree_with_the_environment_are_flagged_as_unreliable(tmp_path, monkeypatch, capsys):
+    reasons_probe(monkeypatch, [("success", 3)] * 6)  # the rule says success from step 3, the environment says so only at step 3...
+    output, summary = run_scripted(tmp_path, monkeypatch, env_name="NutAssemblySquare", no_stitch=True,
+                                   script=[("fail", None)] * 6)  # ...but these rollouts never succeed
+    assert sum(e["Rule_Mismatch_Steps"] for e in summary["episodes"]) > 0
+    assert "The reasons are unreliable here: the rule as written disagreed with the environment's own success on" in capsys.readouterr().out
+
+
+def test_other_tasks_and_a_probe_that_cannot_be_made_get_no_reasons_and_lose_nothing(tmp_path, monkeypatch, capsys):
+    from robomimic.scripts import inspect_square_insertions as insertions
+    output, summary = run_scripted(tmp_path, monkeypatch, env_name="Lift", no_stitch=True)
+    assert not any("Failure_Reason" in e for e in summary["episodes"])
+    assert "Why the rollouts" not in capsys.readouterr().out
+
+    def broken(env):
+        raise RuntimeError("no peg")
+
+    monkeypatch.setattr(insertions, "probe_from_env", broken)
+    (tmp_path / "again").mkdir()
+    output, summary = run_scripted(tmp_path / "again", monkeypatch, env_name="NutAssemblySquare", no_stitch=True)
+    assert summary["n_rollouts_completed"] == 6 and not any("Failure_Reason" in e for e in summary["episodes"])
+    assert capsys.readouterr().out.count("Failure reasons are not available (RuntimeError: no peg)") <= 1
+
+
+def test_a_probe_that_fails_midway_stops_the_reasons_and_nothing_else(tmp_path, monkeypatch, capsys):
+    from robomimic.scripts import inspect_square_insertions as insertions
+
+    class Fails:
+        def read(self):
+            raise ValueError("lost the simulator")
+
+    monkeypatch.setattr(insertions, "probe_from_env", lambda env: Fails())
+    output, summary = run_scripted(tmp_path, monkeypatch, env_name="NutAssemblySquare", no_stitch=True)
+    assert summary["n_rollouts_completed"] == 6 and summary["num_success"] == 3
+    assert not any("Failure_Reason" in e for e in summary["episodes"])
+    assert capsys.readouterr().out.count("Failure reasons stopped (ValueError: lost the simulator)") == 1

@@ -47,6 +47,7 @@ import robomimic.utils.tensor_utils as TensorUtils
 from robomimic.envs.env_base import EnvBase
 from robomimic.envs.wrappers import EnvWrapper
 from robomimic.algo import RolloutPolicy
+from robomimic.utils.trial_metrics import seed_environment
 from robomimic.utils.eval_trial_statistics import (
     TRIAL_METRICS, completed_trial_statistics, define_trial_metrics,
     summarize_trial_rollouts, trial_log_values,
@@ -77,6 +78,11 @@ def seed_everything(seed, env=None):
             env.base_env.seed(seed)
     except Exception:
         pass
+
+    # robosuite draws the object layouts from its own generator, which the lookups above never reach (the wrapper has
+    # no seed(), and robosuite's base_env.seed is not a function), so layouts used to differ between runs of one seed.
+    if env is not None:
+        seed_environment(env, seed)
 
 
 def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,

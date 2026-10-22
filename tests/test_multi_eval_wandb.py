@@ -664,5 +664,21 @@ class EvaluationWandbTests(unittest.TestCase):
                              (512, 512, "1", "20/1"))
 
 
+    def test_seeding_reaches_the_robosuite_generator_that_draws_the_layouts(self):
+        """The wrapper has no seed(): the environment's own generator used to be left alone, so a seed did not fix a layout."""
+        env = types.SimpleNamespace(env=types.SimpleNamespace(rng=np.random.default_rng(0)))
+        layouts = []
+        for _ in range(2):
+            self.evaluator.seed_everything(7, env=env)
+            layouts.append(env.env.rng.random(3).tolist())
+        self.evaluator.seed_everything(8, env=env)
+        other = env.env.rng.random(3).tolist()
+        self.assertEqual(layouts[0], layouts[1])
+        self.assertNotEqual(layouts[0], other)
+        before = env.env.rng.bit_generator.state
+        self.evaluator.seed_everything(None, env=env)  # no seed leaves everything alone
+        self.assertEqual(env.env.rng.bit_generator.state, before)
+
+
 if __name__ == "__main__":
     unittest.main()

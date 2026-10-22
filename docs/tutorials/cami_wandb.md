@@ -506,6 +506,45 @@ The printout ends with one line per trial and the average of the trial success
 rates with its standard error, next to the pooled rate over every rollout. A single
 trial (the default) writes straight into `--output-dir`, as before.
 
+### Why a rollout that looks successful is not counted
+
+On the Square task `rollout_best.py` says why each unsuccessful rollout did not succeed. robosuite
+counts a rollout as a success at the first control step at which three things hold:
+
+- the nut's centre is within 3 cm of the post in x and in y (a box, so a corner 4 cm away passes);
+- the nut's centre is less than 5 cm above the table top;
+- the gripper has let go: its grip point is more than 4.24 cm from the nut's centre
+  (`1 - tanh(10 d) < 0.6`).
+
+It never looks at the nut's tilt, and holding the handle does not block a success, because a
+handle grasp keeps the grip point 6 to 7 cm from the nut's centre. So a nut that is down over the
+post and still held counts; what does not count, although it can look finished in a video, is:
+
+| reason | what the nut is doing |
+| --- | --- |
+| `resting_on_post_top` | on the top or rim of the post, its centre 10 cm or more above the table |
+| `wedged_above_limit` | over the post, loose, between 5 and 10 cm above the table |
+| `held_above_post` | over the post, in the hand, not lowered below 5 cm |
+| `gripper_not_released` | down over the post but the hand is within 4.24 cm of it (it flips to a success when the hand backs off) |
+| `beside_post` | within 10 cm of the post but more than 3 cm off in x or y |
+| `far_from_post` | never within 10 cm of the post |
+
+Each rollout gets `Failure_Reason` (what it ended in, which is what the end of its video shows),
+`Final_Nut_Height_cm`, `Final_XY_Offset_cm`, `Final_Hand_Distance_cm`, `Final_Tilt_deg`,
+`Closest_Reason` (what stopped the state that came nearest to the rule, by how far each
+condition is from its limit as a fraction of that limit) and `Closest_Step`, in `rollouts.csv`,
+`summary.json` and the W&B `rollouts` table; the four final numbers are also logged per rollout and
+the video caption names the reason. Each trial gets the share of its rollouts that failed each way
+(`Trial/Failure/<reason>`, a way that did not occur in a trial counts as 0) and the run summary
+`Summary/Failure/<reason>/...` and `Pooled/Failure/<reason>`. The printout lists the reasons with
+the medians of their numbers. The rule is re-computed from the simulator after every step and
+compared with the environment's own success; if they ever disagree the printout says the reasons
+are unreliable and `Rule_Mismatch_Steps` counts the steps. Other tasks get no reasons.
+
+A video made with `--video-skip` above 1 can also end a few steps before the step where success was
+registered, with the nut still above the height limit; `rollout_best.py` always adds the last frame,
+`run_trained_agent_multi_eval.py` (`--video_skip` 5 by default) does not.
+
 ### Sending an evaluation to Weights & Biases
 
 W&B is opt-in, as in `train.py`: `--wandb`, `--wandb-project NAME` (which also

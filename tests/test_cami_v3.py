@@ -106,12 +106,13 @@ def test_separate_configs_and_no_replacement(tmp_path):
         with config.values_unlocked():
             config.update(value)
         assert config.train.seed == 0
-        assert config.train.num_epochs == 2000 and config.experiment.rollout.n == 50
+        epochs = 5000 if name == "bc_cami_square_contactNetsv3_prediction.json" else 2000
+        assert config.train.num_epochs == epochs and config.experiment.rollout.n == 50
         assert config.experiment.rollout.rate == 50
         if "baseline" in name:
             assert not config.algo.cami.enabled
     files = write_configs(tmp_path)
-    assert len(files) == 11
+    assert len(files) == 12
     before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
     with pytest.raises(FileExistsError):
         write_configs(tmp_path)
@@ -232,7 +233,7 @@ def test_no_v3_config_schedules_the_learning_rate():
     defaults = json.loads(config_factory("bc_cami_v3").dump())
     assert set(defaults["algo"]["optim_params"]) == {"policy", "cami"}
     configs = {"class default": defaults, **{name: resolved(name) for name in make_configs()}}
-    assert len(configs) == 12
+    assert len(configs) == 13
     for name, config in configs.items():
         for optimizer in ("policy", "cami"):
             rate = config["algo"]["optim_params"][optimizer]["learning_rate"]
@@ -351,6 +352,41 @@ def test_scales_use_only_training_demos(data_path):
     c = cfg.algo.cami.continuous
     np.testing.assert_allclose([c.gap_scale, c.normal_impulse_scale, c.tangential_impulse_scale],
                                values.astype(np.float64).std(0) + 1e-6, rtol=1e-6)
+
+
+def test_scales_are_fitted_after_the_descriptor_transform(data_path):
+    from robomimic.CAMI.continuous_contact import transform_descriptors
+    cfg = config_for(data_path, template="bc_cami_square_contactNetsv3_contact.json")
+    assert cfg.algo.cami.v3.descriptor.gap_min == -.005 and cfg.algo.cami.v3.descriptor.impulse_log_scale == .1
+    cami_dataset_utils.prepare_cami_datasets(cfg)
+    with h5py.File(data_path) as f:
+        values = np.concatenate([f["data/" + name + "/contact/physics"][1:]
+                                 for name in ("demo_0", "demo_1")]).astype(np.float64)
+    expected = transform_descriptors(values, -.005, .1).std(0) + 1e-6
+    c = cfg.algo.cami.continuous
+    np.testing.assert_allclose([c.gap_scale, c.normal_impulse_scale, c.tangential_impulse_scale], expected, rtol=1e-6)
+    assert not np.allclose(expected, values.std(0) + 1e-6)
+
+
+@pytest.mark.parametrize("template, missing, gap_min, log_scale", [
+    ("bc_cami_square_contactNetsv3_contact.json", "feature", -.005, .1),
+    ("bc_cami_square_contactNetsv3_prediction.json", "feature", None, None),
+    ("bc_cami_square_contactNetsv3_faithful.json", "timestep", None, None),
+])
+def test_the_built_module_uses_the_configured_masking_and_transform(data_path, template, missing, gap_min, log_scale):
+    model, _, training, validation, _ = setup_model(config_for(data_path, template=template))
+    settings = model.nets["cami"].settings
+    assert (settings["missing_features"], settings["gap_min"], settings["impulse_log_scale"]) == (missing, gap_min, log_scale)
+    close_datasets(training, validation)
+
+
+def test_runs_saved_before_the_options_load_with_their_original_behavior():
+    saved = make_configs()["bc_cami_square_contactNetsv3_prediction.json"]
+    del saved["algo"]["cami"]["v3"]["missing_features"], saved["algo"]["cami"]["v3"]["descriptor"]
+    config, _ = file_utils.config_from_checkpoint(ckpt_dict={"algo_name": "bc_cami_v3", "config": json.dumps(saved)})
+    v3 = config.algo.cami.v3
+    assert v3.missing_features == "timestep"
+    assert v3.descriptor.gap_min is None and v3.descriptor.impulse_log_scale is None
 
 
 def test_auxiliary_gradient_paths_are_distinct(data_path):

@@ -66,7 +66,9 @@ class _CaMIV3Adapter:
             feature_scales=[c.gap_scale, c.normal_impulse_scale, c.tangential_impulse_scale],
             feature_weights=list(c.feature_weights), contact_temperature=c.contact_temperature,
             gamma=c.gamma, huber_delta=c.huber_delta, chunk_size=c.chunk_size,
-            distance_penalty=c.distance_penalty, prediction_enabled=p.enabled,
+            distance_penalty=c.distance_penalty, missing_features=cfg.cami.v3.missing_features,
+            gap_min=cfg.cami.v3.descriptor.gap_min, impulse_log_scale=cfg.cami.v3.descriptor.impulse_log_scale,
+            prediction_enabled=p.enabled,
             prediction_indices=[names.index(name) for name in p.features],
             prediction_hidden_dims=list(p.hidden_dims), prediction_huber_delta=p.huber_delta,
         )

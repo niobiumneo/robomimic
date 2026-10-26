@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 
 from robomimic.CAMI.continuous_contact import (
-    FEATURE_SETS, SCHEMA_VERSION, contact_observation_keys,
+    FEATURE_SETS, SCHEMA_VERSION, contact_observation_keys, transform_descriptors,
 )
 from robomimic.utils.cami_dataset_utils import (
     _blocks, _dataset, resolve_dataset_path, selected_demos,
@@ -16,13 +16,15 @@ from robomimic.utils.cami_dataset_utils import (
 SCALE_KEYS = ("gap_scale", "normal_impulse_scale", "tangential_impulse_scale")
 
 
-def prepare_contactnets_datasets(config, *, require_rnn=True):
+def prepare_contactnets_datasets(config, *, require_rnn=True, transform=None):
     """Check the exact feature order, future offsets, masks and SI units.
 
     A null scale fits std + 1e-6 on the selected training demonstrations. Use
     only offset 1 of each future window so an observation is counted once,
     rather than H times. Validation descriptors never enter these statistics.
     Resolved scales and fitted demo names are saved in the run's config.
+    ``transform`` (keyword arguments of transform_descriptors) is applied before
+    fitting, so scales describe the values the loss divides.
     """
     c, train = config.algo.cami.continuous, config.train
     names = list(c.feature_names)
@@ -149,6 +151,8 @@ def prepare_contactnets_datasets(config, *, require_rnn=True):
                     if (values[..., 1:][valid[..., 1:]] < 0).any():
                         raise ValueError("{}: impulse magnitudes must be nonnegative".format(demo.name))
                     if name in training and any(fit):
+                        if transform:
+                            values = transform_descriptors(values, **transform)
                         for feature in range(3):
                             sample = values[:, 0, feature][valid[:, 0, feature]]
                             n = len(sample)

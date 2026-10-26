@@ -898,7 +898,7 @@ def main():
     parser.add_argument("--seed", type=int, default=10000, help="Rollout i uses seed+i")
     parser.add_argument("--camera-names", nargs="+", default=["agentview"])
     parser.add_argument("--video-skip", type=int, default=1)
-    parser.add_argument("--fps", type=float, default=20,
+    parser.add_argument("--fps", type=float, default=60,
                         help="Playback rate of the videos. control_freq/video_skip plays in real time; "
                              "a higher rate plays faster than the simulation")
     parser.add_argument("--keep-failures", action="store_true",

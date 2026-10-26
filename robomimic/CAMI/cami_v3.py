@@ -16,7 +16,8 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 
 from robomimic.CAMI.continuous_contact import (
-    contact_distance, embedding_logits, negative_weights, weighted_infonce,
+    check_descriptor_transform, contact_distance, embedding_logits, negative_weights,
+    transform_descriptors, weighted_infonce,
 )
 
 
@@ -67,6 +68,15 @@ class CaMIV3(nn.Module):
             raise ValueError("momentum must lie in [0,1]")
         if not math.isfinite(s["prediction_huber_delta"]) or s["prediction_huber_delta"] <= 0:
             raise ValueError("prediction_huber_delta must be finite and positive")
+        # Settings saved before these options existed keep their original behavior.
+        s.setdefault("missing_features", "timestep")
+        s.setdefault("gap_min", None)
+        s.setdefault("impulse_log_scale", None)
+        if s["missing_features"] not in ("timestep", "feature"):
+            raise ValueError("missing_features must be timestep or feature")
+        check_descriptor_transform(s["gap_min"], s["impulse_log_scale"])
+        if (s["gap_min"] is not None or s["impulse_log_scale"] is not None) and len(scales) != 3:
+            raise ValueError("Descriptor transforms require [gap, normal_impulse, tangential_impulse] channels")
         self.register_buffer("feature_scales", scales)
         self.feature_dim, self.action_dim = feature_dim, action_dim
         dim = s["contrastive_dim"]
@@ -113,7 +123,9 @@ class CaMIV3(nn.Module):
         if not torch.isfinite(contact[mask]).all() or not torch.isfinite(expert_actions[action_valid]).all():
             raise ValueError("Nonfinite valid actions or descriptors")
         actions = expert_actions.masked_fill(~action_valid[..., None], 0.)
-        normalized = torch.where(mask, contact.detach(), 0.) / self.feature_scales
+        contact = transform_descriptors(torch.where(mask, contact.detach(), 0.),
+                                        self.settings["gap_min"], self.settings["impulse_log_scale"])
+        normalized = torch.where(mask, contact, 0.) / self.feature_scales
         state_query = self.state_projector(features)
         traj_query = self._embed_actions(actions, lengths)
         with torch.no_grad():
@@ -121,7 +133,7 @@ class CaMIV3(nn.Module):
             distance, pair_valid = contact_distance(
                 normalized, mask, self.settings["feature_weights"],
                 self.settings["huber_delta"], self.settings["chunk_size"],
-                penalty=self.settings["distance_penalty"])
+                penalty=self.settings["distance_penalty"], missing=self.settings["missing_features"])
             pair_valid &= (lengths > 0)[:, None] & (lengths > 0)[None]
             weights = negative_weights(distance, pair_valid, self.settings["contact_temperature"],
                                        self.settings["gamma"])

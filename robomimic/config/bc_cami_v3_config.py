@@ -25,8 +25,13 @@ class BCCaMIV3Config(BCCaMIContactNetsConfig):
         for name in ("state_encoder", "snippet_encoder", "key_proj"):
             del self.algo.optim_params[name]
         self.algo.cami.v3.context_steps = 5
-        self.algo.cami.v3.warmup_epochs = 100
+        self.algo.cami.v3.warmup_epochs = 0
         self.algo.cami.v3.gradient_diagnostics_every = 100
+        # "feature": an unobserved channel drops only itself from a pair distance, not the timestep.
+        self.algo.cami.v3.missing_features = "feature"
+        # Optional descriptor compression before scaling; scales are fitted after it.
+        self.algo.cami.v3.descriptor.gap_min = None            # clip penetration below this gap (m)
+        self.algo.cami.v3.descriptor.impulse_log_scale = None  # impulses I -> s * log1p(I / s) (N*s)
         self.algo.cami.v3.prediction.enabled = False
         self.algo.cami.v3.prediction.features = ["gap"]
         self.algo.cami.v3.prediction.hidden_dims = [128]

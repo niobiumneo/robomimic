@@ -892,7 +892,7 @@ class LauncherTests(unittest.TestCase):
         from robomimic.scripts.generate_cami_v3_configs import VARIANT_CONFIGS
         for variant, filename in VARIANT_CONFIGS.items():
             with self.subTest(variant=variant):
-                settings, _ = train_trials.make_plan(self.args(config=None, variant=variant))
+                settings, _ = train_trials.make_plan(self.args(config=None, variant=variant, epochs=None))
                 template = json.loads((train_trials.REPO_ROOT / "robomimic/exps/templates" / filename).read_text())
                 self.assertEqual(settings["config"]["algo_name"], "bc_cami_v3")
                 self.assertEqual(settings["config"]["algo"], template["algo"])

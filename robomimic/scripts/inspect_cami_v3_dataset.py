@@ -26,7 +26,7 @@ import h5py
 import numpy as np
 import torch
 
-from robomimic.CAMI.continuous_contact import contact_distance, negative_weights
+from robomimic.CAMI.continuous_contact import contact_distance, negative_weights, transform_descriptors
 from robomimic.config import config_factory
 from robomimic.utils.cami_dataset_utils import resolve_dataset_path
 
@@ -110,40 +110,53 @@ def load_pool(path, config):
     return pool
 
 
+def descriptor_transform(config):
+    """The v3 descriptor transform the trainer applies before scaling."""
+    d = config.algo.cami.v3.descriptor
+    return dict(gap_min=d.gap_min, impulse_log_scale=d.impulse_log_scale)
+
+
 def fit_scales(pool, config):
-    """Training-demo std + 1e-6 of offset-1 values, as the trainer fits them (or the config's explicit scales)."""
+    """Training-demo std + 1e-6 of offset-1 values after the descriptor transform, as the trainer fits them
+    (or the config's explicit scales)."""
     c = config.algo.cami.continuous
     explicit = [c.gap_scale, c.normal_impulse_scale, c.tangential_impulse_scale]
+    transform = descriptor_transform(config)
     scales = []
     for i, given in enumerate(explicit):
         if given is not None:
             scales.append(float(given))
             continue
-        values = np.concatenate([s[0][:, 0, i][s[1][:, 0, i]] for s in pool["series"].values()]).astype(np.float64)
+        values = np.concatenate([transform_descriptors(s[0][:, 0].astype(np.float64), **transform)[:, i][s[1][:, 0, i]]
+                                 for s in pool["series"].values()])
         scales.append(float(values.std() + 1e-6))
     return scales
 
 
-def channel_statistics(pool, scales, cap):
+def channel_statistics(pool, scales, cap, transform=None):
+    """Physical statistics of each channel; the normalized quantiles are what the loss sees, after the transform."""
     rows = []
     values = [np.concatenate([s[0][:, 0, i][s[1][:, 0, i]] for s in pool["series"].values()]).astype(np.float64)
               for i in range(3)]
     total = sum(len(s[0]) for s in pool["series"].values())
     for i, (name, x) in enumerate(zip(CHANNELS, values)):
         q = np.quantile(x, [.5, .9, .99]) if len(x) else np.zeros(3)
+        # Both transforms are monotonic, so they map quantiles to quantiles.
+        n = transform_descriptors(np.tile(q[:, None], (1, 3)), **(transform or {}))[:, i] / scales[i]
         rows.append(dict(
             channel=name, valid_fraction=len(x) / max(1, total), scale=scales[i], mean=float(x.mean()), std=float(x.std()),
             at_cap=float((x >= cap - 1e-6).mean()) if i == 0 else None,
             penetrating=float((x <= 0).mean()) if i == 0 else None,
             exactly_zero=float((x == 0).mean()) if i else None,
             p50=float(q[0]), p90=float(q[1]), p99=float(q[2]),
-            normalized_p50=float(q[0] / scales[i]), normalized_p90=float(q[1] / scales[i]), normalized_p99=float(q[2] / scales[i])))
+            normalized_p50=float(n[0]), normalized_p90=float(n[1]), normalized_p99=float(n[2])))
     return rows
 
 
 def unobserved_gap_rows(pool):
-    """Rows with a measured normal impulse but no valid gap. A pair distance drops a whole timestep when any
-    weighted channel is missing, so these rows contribute no impulse to any W_ij while the gap weight is positive."""
+    """Rows with a measured normal impulse but no valid gap. With missing_features="timestep" a pair distance drops
+    a whole timestep when any weighted channel is missing, so these rows contribute no impulse to any W_ij while the
+    gap weight is positive; "feature" keeps their impulses."""
     rows = impulse_rows = 0
     for state, mask in pool["series"].values():
         measured = mask[:, 0, 1] & (state[:, 0, 1] > 0)
@@ -201,12 +214,14 @@ def weight_regime(pool, scales, config, labels, batch_size, batches, seed, overr
         raise ValueError("batch size {} exceeds the {} anchors training would draw from".format(batch_size, len(pool["lengths"])))
     c = config.algo.cami.continuous
     settings = dict(feature_weights=list(c.feature_weights), contact_temperature=c.contact_temperature, gamma=c.gamma,
-                    huber_delta=c.huber_delta, distance_penalty=c.distance_penalty, chunk_size=c.chunk_size)
+                    huber_delta=c.huber_delta, distance_penalty=c.distance_penalty, chunk_size=c.chunk_size,
+                    missing_features=config.algo.cami.v3.missing_features)
     settings.update(overrides or {})
     rng = np.random.default_rng(seed)
     scale = torch.as_tensor(scales, dtype=torch.float64)
-    windows = torch.as_tensor(pool["windows"])
     masks = torch.as_tensor(pool["mask"])
+    windows = transform_descriptors(torch.where(masks, torch.as_tensor(pool["windows"]), torch.zeros(())),
+                                    **descriptor_transform(config))
     lengths = torch.as_tensor(pool["lengths"])
     near_zero, near_one, eff, loss, active, mid = [], [], [], [], [], []
     pair_count, pair_mass = np.zeros((3, 3)), np.zeros((3, 3))
@@ -216,7 +231,8 @@ def weight_regime(pool, scales, config, labels, batch_size, batches, seed, overr
         mask, length = masks[idx], lengths[idx]
         normalized = torch.where(mask, windows[idx], torch.zeros(())) / scale
         distance, valid = contact_distance(normalized, mask, settings["feature_weights"], settings["huber_delta"],
-                                           settings["chunk_size"], penalty=settings["distance_penalty"])
+                                           settings["chunk_size"], penalty=settings["distance_penalty"],
+                                           missing=settings["missing_features"])
         valid &= (length > 0)[:, None] & (length > 0)[None]
         w = negative_weights(distance, valid, settings["contact_temperature"], settings["gamma"])
         eye = torch.eye(batch_size, dtype=torch.bool)
@@ -255,7 +271,7 @@ def build_report(args):
     report = dict(dataset=str(path), variant=args.variant or args.config, batch_size=batch_size, anchor_offset=config.algo.cami.v3.context_steps,
                   horizon=config.algo.cami.snippet_horizon, train_demos=len(pool["names"]), anchors=int(len(labels)),
                   eligible_anchor_fraction=float(eligible.mean()), gap_cap=cap, binary_threshold=threshold,
-                  reconstruction=meta.get("reconstruction"), channels=channel_statistics(pool, scales, cap),
+                  reconstruction=meta.get("reconstruction"), channels=channel_statistics(pool, scales, cap, descriptor_transform(config)),
                   classes={name: float((labels == i).sum() / max(1, eligible.sum())) for i, name in enumerate(CLASSES)},
                   onset_lag=onset_lags(pool), unobserved_gap=unobserved_gap_rows(pool), settings={}, regimes={},
                   explicit_scales=[v for v in (config.algo.cami.continuous.gap_scale, config.algo.cami.continuous.normal_impulse_scale,
@@ -267,7 +283,9 @@ def build_report(args):
              ("gap channel only", dict(feature_weights=[weights[0], 0., 0.])),
              ("impulse channels only", dict(feature_weights=[0., weights[1], weights[2]]))]
     report["settings"] = dict(feature_weights=weights.tolist(), contact_temperature=c.contact_temperature, gamma=c.gamma,
-                              huber_delta=c.huber_delta, distance_penalty=c.distance_penalty, scales=scales)
+                              huber_delta=c.huber_delta, distance_penalty=c.distance_penalty, scales=scales,
+                              missing_features=config.algo.cami.v3.missing_features,
+                              **descriptor_transform(config))
     for label, overrides in cases:
         report["regimes"][label] = weight_regime(pool, scales, config, labels, batch_size, args.batches, args.seed, overrides)
     return report
@@ -282,7 +300,8 @@ def flags(report):
     if classes["contact"] < .05:
         out.append("WARN only {:.1%} of anchors have a window with an impulse above the binary threshold".format(classes["contact"]))
     unobserved = report["unobserved_gap"]
-    if unobserved["fraction"] > .05 and report["settings"]["feature_weights"][0] > 0:
+    if (unobserved["fraction"] > .05 and report["settings"]["feature_weights"][0] > 0
+            and report["settings"]["missing_features"] == "timestep"):
         out.append("WARN {:.0%} of the rows with a measured impulse have no valid gap; every pair distance drops them "
                    "while the gap weight is positive".format(unobserved["fraction"]))
     current = report["regimes"]["config as trained"]
@@ -332,6 +351,8 @@ def print_report(report):
     p("\nWeights W_ij of random batches of {} (weights {}, tau_c {}, gamma {}, {})".format(
         report["batch_size"], [round(w, 4) for w in s["feature_weights"]], s["contact_temperature"], s["gamma"],
         "huber delta {}".format(s["huber_delta"]) if s["distance_penalty"] == "huber" else s["distance_penalty"]))
+    p("  missing channels drop the {} | gap_min {} | impulse_log_scale {}".format(
+        s["missing_features"], s["gap_min"], s["impulse_log_scale"]))
     p("  {:<42}{:>9}{:>9}{:>9}{:>10}{:>10}{:>11}".format("case", "W<.01", "W>.99", "median", "sum_j W", "any neg", "init loss"))
     for label, r in report["regimes"].items():
         p("  {:<42}{:>9.1%}{:>9.1%}{:>9.3f}{:>10.2f}{:>10.1%}{:>11.3f}".format(

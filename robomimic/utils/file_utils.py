@@ -330,6 +330,15 @@ def update_config(cfg):
                 "obs_randomizer_kwargs": dict(),
             }
 
+    # CaMI v3 runs saved before per-channel masking and descriptor transforms dropped a whole
+    # timestep for a missing channel and used raw descriptors; keep that behavior when they load.
+    v3 = cfg.get("algo", {}).get("cami", {}).get("v3") if cfg.get("algo_name") == "bc_cami_v3" else None
+    if isinstance(v3, dict):
+        v3.setdefault("missing_features", "timestep")
+        descriptor = v3.setdefault("descriptor", {})
+        descriptor.setdefault("gap_min", None)
+        descriptor.setdefault("impulse_log_scale", None)
+
 
 def config_from_checkpoint(algo_name=None, ckpt_path=None, ckpt_dict=None, verbose=False):
     """

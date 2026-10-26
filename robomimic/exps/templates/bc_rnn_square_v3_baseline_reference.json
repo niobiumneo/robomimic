@@ -257,6 +257,11 @@
                 "context_steps": 0,
                 "warmup_epochs": 0,
                 "gradient_diagnostics_every": 100,
+                "missing_features": "feature",
+                "descriptor": {
+                    "gap_min": null,
+                    "impulse_log_scale": null
+                },
                 "prediction": {
                     "enabled": false,
                     "features": [

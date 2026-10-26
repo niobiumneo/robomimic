@@ -27,9 +27,12 @@ python -m robomimic.scripts.train_cami_v3 \
   --quiet
 ```
 
-The recommended starting variant uses batch size 32, five preceding observation
-steps before the CaMI decision time, ten future action/contact steps, and a
-100-epoch state-loss warmup. The prediction head is disabled. Training remains
+The `warmup` variant uses batch size 32, five preceding observation steps before
+the CaMI decision time and ten future action/contact steps. Its 100-epoch
+state-loss warmup has since been removed from every variant (`warmup_epochs` is
+0), so it now matches `history`. The prediction head is disabled. To train with
+both gaps and impulses shaping the weights, use the `contact` variant
+([below](#gaps-and-impulses-the-contact-variant)). Training remains
 2,000 epochs, with 50 rollout episodes every 50 epochs, validation enabled,
 a constant learning rate of 1e-4, and best-success checkpoint saving.
 All bundled v3 variants use seed 0. This is not a guarantee of GPU determinism.
@@ -82,9 +85,10 @@ python -m robomimic.scripts.train_trials \
 | `batch32` | 32 | 11 | 0 | 0 | Off |
 | `batch64` | 64 | 11 | 0 | 0 | Off |
 | `history` | 32 | 16 | 5 | 0 | Off |
-| `warmup` | 32 | 16 | 5 | 100 | Off |
-| `prediction` | 32 | 16 | 5 | 100 | Future signed gap |
-| `prediction_full` | 32 | 16 | 5 | 100 | Future gap and both impulses |
+| `warmup` | 32 | 16 | 5 | 0 | Off |
+| `prediction` | 16 | 16 | 5 | 0 | Future signed gap (5,000 epochs) |
+| `prediction_full` | 32 | 16 | 5 | 0 | Future gap and both impulses |
+| `contact` | 32 | 16 | 5 | 0 | Future gap and both impulses; see below |
 | `baseline` | 32 | 16 | N/A | N/A | No CaMI modules |
 | `faithful` | 16 | 11 | 0 | 0 | Off, and see below |
 | `baseline_faithful` | 16 | 11 | N/A | N/A | No CaMI modules |
@@ -98,7 +102,10 @@ The baseline uses the same deterministic BC-RNN policy, image augmentation,
 observations and BC objective as its matching v3 setting. It excludes padded
 steps from BC loss, constructs no CaMI network or auxiliary optimizer, and
 requires no contact labels. `baseline` matches the batch and sequence settings
-of `history`, `warmup` and `prediction`; `baseline_reference` matches `reference`.
+of `history`, `warmup`, `prediction_full` and `contact`; `baseline_reference`
+matches `reference`. `prediction` now trains with batch 16 for 5,000 epochs, so
+neither baseline matches it: compare it with a copy of `baseline` set to the same
+batch size and epochs.
 
 ### `faithful` and `baseline_faithful`
 
@@ -153,10 +160,11 @@ the others are intended extensions or open points.
 | Weights | `W = (1 - exp(-D / tau_c))^gamma`, fixed, zero on the diagonal and without common offsets | Same, with the same defaults (`tau_c` 0.05, gamma 1, delta 0.1) |
 | Loss | Full-batch mean of `-log(exp(S_ii) / (exp(S_ii) + sum W exp(S)))` for the state and trajectory branches against one shared EMA key | Same. The log-sum-exp form handles rows without negatives |
 | Targets | EMA of the LSTM and head after the optimizer step, none for the state projector, untouched in validation | Same |
-| Gradients | The policy receives BC and state-loss gradients | Same for `reference`, `faithful` and the warmup variants; the prediction variants also send the prediction loss into the policy features |
-| Anchor | The first policy feature | `reference`, `batch32`, `batch64`, `faithful`: the first feature. `history`, `warmup`, `prediction*`: the feature after five steps of context. The report leaves open how longer history enters the anchor (section 8) |
-| State-loss weight | Constant 0.01 | `warmup`, `prediction*`: ramps from 0 to 0.01 over the first 100 epochs *(removed in `faithful`)* |
-| Prediction head | None (it names a prediction head as a separate probe, section 9) | `prediction*` add a head (weight 0.01 times the ramp) whose input is the policy feature and a detached action embedding *(removed in `faithful`)* |
+| Gradients | The policy receives BC and state-loss gradients | Same for `reference`, `faithful`, `history` and `warmup`; `prediction*` and `contact` also send the prediction loss into the policy features |
+| Anchor | The first policy feature | `reference`, `batch32`, `batch64`, `faithful`: the first feature. `history`, `warmup`, `prediction*`, `contact`: the feature after five steps of context. The report leaves open how longer history enters the anchor (section 8) |
+| State-loss weight | Constant 0.01 | Constant 0.01 in every variant (the earlier 100-epoch ramp is set to 0) |
+| Missing channels | Not specified | A channel missing in either sample drops only itself; the rest are rescaled by `sum(w) / sum(observed w)` (`missing_features: "feature"`). `faithful` keeps the earlier rule, which drops the whole timestep |
+| Prediction head | None (it names a prediction head as a separate probe, section 9) | `prediction*` and `contact` add a head (weight 0.01) whose input is the policy feature and a detached action embedding *(removed in `faithful`)* |
 | Padding | Left to be specified | BC loss ignores padded steps. Snippets are packed to their real length, and anchors with no future action have zero CaMI loss |
 | Rollout hidden state | Not specified | Reset every `rnn.horizon` steps. Variants train on 11 or 16 steps but reset every 10 *(aligned in `faithful`)* |
 | Learning rate, validation | Not specified | Constant learning rate of 1e-4 in every variant. Except the `faithful` pair, they train on the `train` split and validate on `valid` |
@@ -178,7 +186,7 @@ well as seeds and hyperparameters. Compare one change at a time, use matched
 rollout starts for development, and evaluate selected checkpoints on fresh
 starts. A single training seed does not establish robustness across training.
 
-## Alignment and warmup
+## Alignment and loss
 
 Each stored `contact_state[t]` contains offsets `t+1,...,t+10`. With five context
 steps, the adapter selects policy features at index 5 and pairs them with
@@ -186,6 +194,11 @@ steps, the adapter selects policy features at index 5 and pairs them with
 through index 5, but none after it. Padding masks exclude unavailable actions
 and labels. Samples too close to a demonstration end can still contribute BC
 loss while contributing zero CaMI loss.
+
+Within a window, row k holds the gap in the recorded state before action t+k+1
+and the impulse integrated while that action runs. So row k describes the same
+step as `actions[t+k+1]`, the k-th action of the snippet. The anchor's own action
+`actions[t]` is the BC target and is in neither the snippet nor the labels.
 
 The objective is:
 
@@ -196,11 +209,10 @@ L = L_IL
     + ramp(epoch) * lambda_prediction * L_prediction
 ```
 
-`ramp(epoch) = clamp((epoch - 1) / 100, 0, 1)` for the warmup variants. Epoch 1
-therefore trains BC and the action-snippet representation; epoch 101 uses the
-full requested state and prediction weights. The default coefficients are
-`lambda_state=0.01`, `lambda_traj=1.0`, and, when enabled,
-`lambda_prediction=0.01`. Disabling warmup sets the ramp to one immediately.
+`ramp(epoch) = clamp((epoch - 1) / warmup_epochs, 0, 1)`. Every bundled variant
+sets `warmup_epochs` to 0, which makes the ramp one from epoch 1. The default
+coefficients are `lambda_state=0.01`, `lambda_traj=1.0`, and, when enabled,
+`lambda_prediction=0.01`.
 The trajectory loss trains the snippet encoder and its projection; its effect
 on the policy is through the target used by state loss.
 
@@ -219,6 +231,81 @@ impulses are simulator estimates. `prediction_full` is a separate ablation of
 the three channels, not an assumption that reconstructed impulses are accurate.
 Training-only normalization and reconstruction provenance are saved in the
 checkpoint config, using the existing descriptor checks.
+
+## Gaps and impulses: the `contact` variant
+
+The labels describe only the nut against the insertion peg (five geometry pairs,
+`peg1` against `SquareNut_g0..g4`). Gripper-nut and nut-table contact never reach
+them: "free" includes a nut held firmly in the gripper, and impulses measure only
+the peg's load on the nut. Recording grasp force would need new pairs and a new
+preparation.
+
+An audit of `square_image_84_contactnets_state.hdf5` found the labels sound but
+their use in the weights lossy:
+
+- Gaps reproduce exactly from the recorded states, and re-simulating gives the
+  stored impulses exactly. Recorded insertions contain overlaps down to -2 cm,
+  where the robot presses the nut onto the peg at 40-90 N; MuJoCo 3.5 reproduces
+  that motion, so these are real pressing events, not replay artifacts.
+- An unknown gap used to drop its whole timestep, impulses included: 25% of the
+  rows with a measured impulse never reached `W`.
+- With weights `[1,1,1]` and `tau_c` 0.05, almost every pair of contact windows had
+  `W` about 0.98. Impulses then pushed all contact windows apart equally instead of
+  separating light contact from pressing. Tangential impulse nearly repeats normal
+  impulse (correlation 0.93), and the deepest rows inflate the impulse scale.
+
+Three changes address this.
+
+1. **Per-channel masking.** `algo.cami.v3.missing_features` defaults to
+   `"feature"`. A channel missing in either sample drops only itself; the
+   observed channels are rescaled by `sum(w) / sum(observed w)`. A timestep counts
+   when any weighted channel is observed in both samples. Without missing data
+   both rules give the same distance. `faithful` keeps `"timestep"`.
+2. **Per-pair gap rule.** A known CCD failure makes `mj_geomDistance` report 0
+   for separated geoms. The gap used to be unknown whenever any of the five pairs
+   failed. It now stays known when another pair is validly penetrating, because
+   that pair is then the minimum. New preparations use this rule (`gap_rule` in
+   the metadata). For an existing dataset, recompute the gap channel from the
+   recorded states, with no stepping and impulses unchanged:
+
+   ```bash
+   python -m robomimic.scripts.recompute_cami_gaps \
+     --dataset dataset/square_image_84_contactnets_state.hdf5 \
+     --output dataset/square_image_84_contactnets_state_gapfix.hdf5
+   ```
+
+   On the Square dataset this lowers unknown gaps from 7.2% to 3.1% of rows.
+   Every previously valid gap is unchanged, which the script checks.
+3. **Descriptor transforms.** `algo.cami.v3.descriptor.gap_min` clips penetration
+   below that gap (m). `impulse_log_scale` `s` replaces each impulse `I` by
+   `s * log1p(I / s)`, which is linear below `s` N*s and logarithmic above it. Both
+   default to null. When set, they are applied before scaling, and the scales are
+   fitted on the transformed values.
+
+The `contact` variant uses all three: weights 1/3 each, `gap_min` -0.005,
+`impulse_log_scale` 0.1, prediction of all three channels, and the gap-fixed
+dataset. On that dataset, the inspector reports:
+
+- pairs with `W > 0.99`: 10% (34% for `prediction`);
+- contact-vs-contact pairs: mean `W` 0.86 instead of about 0.98;
+- free-vs-contact pairs: mean `W` 0.94.
+
+These are properties of the labels; compare `contact` with `baseline` in
+training before concluding it helps.
+
+```bash
+python -m robomimic.scripts.train_cami_v3 \
+  --variant contact \
+  --dataset dataset/square_image_84_contactnets_state_gapfix.hdf5 \
+  --name square_cami_v3_contact \
+  --wandb-project cami-square-v3 \
+  --quiet
+```
+
+Training uses 16-step sequences, but rollout resets the hidden state every
+`rnn.horizon` = 10 steps, so BC positions 10-15 train memory lengths rollout never
+uses. The anchor (six observations) is within the rollout range, and the
+`baseline` arms match, so comparisons stay fair.
 
 ## Porting CaMI
 
@@ -267,8 +354,10 @@ sequence and the anchor sits `context_steps` in, so `reference` and
   `near` (anything between) and `contact` (a normal impulse above the binary
   threshold), the offset between each gap-closing and its impulse onset (over
   observed gap rows), and how many rows with a measured impulse have no valid gap.
-  A pair distance drops a whole timestep when any weighted channel is missing, so
-  those rows add no impulse to any weight while the gap weight is positive;
+  With `missing_features: "timestep"` (`faithful`), a pair distance drops a whole
+  timestep when any weighted channel is missing, so those rows add no impulse to
+  any weight while the gap weight is positive, and the report warns about them.
+  The default `"feature"` keeps their impulses;
 - for random batches of the configured size, the fraction of pairs with
   `W < 0.01` and `W > 0.99`, the mean `sum_j W_ij`, the share of anchors with
   any negative, and `init loss = mean_i log(1 + sum_j W_ij)`, the state loss an

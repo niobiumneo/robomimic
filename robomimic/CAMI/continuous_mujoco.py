@@ -70,11 +70,17 @@ class ContinuousContactProbe:
             raise ValueError("At least one explicit pair is required")
         self.lookup = {tuple(sorted(p)) for p in self.pairs}
 
+    GAP_RULE = "per_pair_penetration_min"
+
     def gap(self):
         # Keep signed soft-contact penetration. The witness segment also lets
         # us reject a known CCD failure: zero distance between separated geoms.
         # Never reinterpret that failure as measured touching contact.
-        values, valid = [], True
+        # Each pair is judged on its own. The failure reports separated geoms,
+        # so when a valid pair penetrates, that pair is the minimum and the gap
+        # is known; otherwise a failed pair could be the closest and the gap is
+        # unknown.
+        values, failed = [], False
         tolerance = max(1e-5, 10. * float(self.model.opt.ccd_tolerance))
         for a, b in self.pairs:
             witness = np.zeros(6)
@@ -82,12 +88,13 @@ class ContinuousContactProbe:
                                                    self.max_gap, witness))
             length = float(np.linalg.norm(witness[3:] - witness[:3]))
             if not np.isfinite(distance) or not np.isfinite(length):
-                valid = False
+                failed = True
             elif distance < self.max_gap - tolerance and abs(abs(distance) - length) > tolerance:
-                valid = False
-            values.append(distance)
-        self.gap_valid = valid
-        return min(values) if valid else 0.  # Placeholder accompanied by validity=0.
+                failed = True
+            else:
+                values.append(distance)
+        self.gap_valid = bool(values) and (not failed or min(values) <= 0.)
+        return min(values) if self.gap_valid else 0.  # Placeholder accompanied by validity=0.
 
     def contacts(self):
         """One row per selected solver contact, in native geom1 -> geom2 order."""
@@ -313,6 +320,7 @@ def replay_descriptors(env, demo, specification, max_gap=.02, tolerance=1e-3,
                                "replay_mode": replay_mode, "replay_tolerance": tolerance,
                                "gap_semantics": ("recorded_state_geometry" if replay_mode == "state"
                                                  else "replayed_state_geometry"),
+                               "gap_rule": probe.GAP_RULE,
                                "impulse_semantics": ("state_conditioned_simulator_estimate" if replay_mode == "state"
                                                      else "open_loop_simulator_reconstruction"),
                                "mujoco_version": probe.mj.__version__,

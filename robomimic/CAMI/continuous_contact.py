@@ -8,7 +8,8 @@ rho(x) = abs(x) by default (L1). Huber is an explicit optional ablation,
 not a requirement of ContactNets. B is the number of anchors in the minibatch,
 H the future horizon, and F the number of descriptor features.
 
-Only jointly observed, complete timesteps enter a pair's horizon average.
+By default only jointly observed, complete timesteps enter a pair's horizon
+average; contact_distance(missing="feature") keeps partially observed ones.
 Disabled features (weight zero) do not affect timestep validity. Zero-negative
 rows contribute zero to the batch mean, exactly as in the supplied formulation.
 """
@@ -70,6 +71,34 @@ def force_magnitude(wrench):
     return result
 
 
+def check_descriptor_transform(gap_min=None, impulse_log_scale=None):
+    if gap_min is not None and not math.isfinite(gap_min):
+        raise ValueError("descriptor.gap_min must be null or finite")
+    if impulse_log_scale is not None and (not math.isfinite(impulse_log_scale) or impulse_log_scale <= 0):
+        raise ValueError("descriptor.impulse_log_scale must be null or finite and positive")
+
+
+def transform_descriptors(values, gap_min=None, impulse_log_scale=None):
+    """Optionally compress [..., gap, normal_impulse, tangential_impulse] before scaling.
+
+    gap_min clips penetration below that depth (m), so deep overlaps stop
+    dominating the distance. impulse_log_scale s replaces each impulse I by
+    s * log1p(I / s): linear below s (N*s), logarithmic above it, so impulses
+    keep their units and order. None leaves a channel unchanged. Works on numpy
+    arrays and torch tensors; masked placeholders of 0 map to 0.
+    """
+    check_descriptor_transform(gap_min, impulse_log_scale)
+    if gap_min is None and impulse_log_scale is None:
+        return values
+    lib = torch if torch.is_tensor(values) else np
+    gap, impulses = values[..., :1], values[..., 1:]
+    if gap_min is not None:
+        gap = lib.maximum(gap, lib.full_like(gap, gap_min))
+    if impulse_log_scale is not None:
+        impulses = impulse_log_scale * lib.log1p(impulses / impulse_log_scale)
+    return lib.concatenate((gap, impulses), -1) if lib is np else torch.cat((gap, impulses), -1)
+
+
 def normalize_contact(contact, feature_names, gap_scale=.02, force_scale=50., normal_impulse_scale=2.5, tangential_impulse_scale=2.5):
     """Divide SI quantities by training std + epsilon; do not clip large forces.
 
@@ -95,17 +124,24 @@ def normalize_contact(contact, feature_names, gap_scale=.02, force_scale=50., no
 
 
 @torch.no_grad()
-def contact_distance(normalized, mask, feature_weights, delta=.1, chunk_size=64, *, penalty="l1"):
+def contact_distance(normalized, mask, feature_weights, delta=.1, chunk_size=64, *, penalty="l1",
+                     missing="timestep"):
     """Return [B,B] distances and validity; sum features, average time.
 
     With no missing data this is exactly (1/H) sum_h sum_f w_f rho(diff).
-    With missing data, exclude timesteps missing any enabled feature from either
-    sample and divide by the remaining timestep count. No overlap => invalid.
+    missing="timestep" excludes timesteps missing any enabled feature from either
+    sample and divides by the remaining timestep count. missing="feature" keeps a
+    timestep when any enabled feature is observed in both samples: it sums
+    w_f rho over those features and rescales by sum(w) / sum(observed w), so an
+    unobserved gap no longer discards the impulses measured at the same step.
+    Both are identical without missing data. No overlap => invalid.
     rho(x)=abs(x) for L1; Huber uses 0.5*x**2 below delta and
     delta*(abs(x)-0.5*delta) above it. delta is ignored for L1.
     """
     if penalty not in ("l1", "huber"):
         raise ValueError("penalty must be l1 or huber")
+    if missing not in ("timestep", "feature"):
+        raise ValueError("missing must be timestep or feature")
     if penalty == "huber" and (not math.isfinite(delta) or delta <= 0):
         raise ValueError("Huber delta must be finite and positive")
     if not isinstance(chunk_size, int) or chunk_size < 1:
@@ -128,9 +164,15 @@ def contact_distance(normalized, mask, feature_weights, delta=.1, chunk_size=64,
         diff = (c[start:start + chunk_size, None] - c[None]).abs()
         rho = diff if penalty == "l1" else torch.where(
             diff <= delta, .5 * diff.square(), delta * (diff - .5 * delta))
-        common = complete[start:start + chunk_size, None] & complete[None]
+        if missing == "timestep":
+            common = complete[start:start + chunk_size, None] & complete[None]
+            per_time = (rho * w).sum(-1)
+        else:
+            observed = (mask[start:start + chunk_size, None] & mask[None]).to(c.dtype) * w
+            weight = observed.sum(-1)
+            common = weight > 0
+            per_time = (rho * observed).sum(-1) * w.sum() / weight.clamp_min(torch.finfo(c.dtype).tiny)
         count = common.sum(-1)
-        per_time = (rho * w).sum(-1)
         distances.append(per_time.masked_fill(~common, 0.).sum(-1) / count.clamp_min(1))
         validity.append(count > 0)
     return torch.cat(distances), torch.cat(validity)

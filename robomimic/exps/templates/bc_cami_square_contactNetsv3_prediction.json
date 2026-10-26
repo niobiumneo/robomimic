@@ -71,8 +71,8 @@
         },
         "goal_mode": null,
         "cuda": true,
-        "batch_size": 32,
-        "num_epochs": 2000,
+        "batch_size": 16,
+        "num_epochs": 5000,
         "seed": 0,
         "max_grad_norm": 1
     },
@@ -257,8 +257,13 @@
             },
             "v3": {
                 "context_steps": 5,
-                "warmup_epochs": 100,
+                "warmup_epochs": 0,
                 "gradient_diagnostics_every": 100,
+                "missing_features": "feature",
+                "descriptor": {
+                    "gap_min": null,
+                    "impulse_log_scale": null
+                },
                 "prediction": {
                     "enabled": true,
                     "features": [
